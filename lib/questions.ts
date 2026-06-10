@@ -1,0 +1,135 @@
+export type QuestionType = "text" | "select" | "multi"
+
+export type Question = {
+  id: string
+  label: string
+  type: QuestionType
+  placeholder?: string
+  options?: string[]
+}
+
+export const questions: Question[] = [
+  { id: "name", label: "Full Name", type: "text", placeholder: "Your name" },
+  { id: "email", label: "Email Address", type: "text", placeholder: "your@email.com" },
+  { id: "age_range", label: "Age Range", type: "select", options: ["25–34", "35–44", "45–54", "55–64", "65+"] },
+  {
+    id: "neighborhood",
+    label: "What part of Columbia are you in?",
+    type: "select",
+    options: [
+      "Downtown / Vista",
+      "Five Points",
+      "Shandon / Rosewood",
+      "Northeast Columbia",
+      "West Columbia",
+      "Irmo / Lake Murray",
+      "Fort Jackson area",
+      "Other / Just visiting",
+    ],
+  },
+  {
+    id: "motivation",
+    label: "What brought you here?",
+    type: "select",
+    options: [
+      "New to Columbia",
+      "Rebuilding my social life",
+      "Looking for deeper friendships",
+      "Just curious and open",
+      "My therapist said get out more",
+    ],
+  },
+  {
+    id: "talk_about",
+    label: "Topics you could talk about for hours (pick up to 3)",
+    type: "multi",
+    options: [
+      "Food & cooking",
+      "Music",
+      "Travel",
+      "Business & entrepreneurship",
+      "Wellness & mental health",
+      "Sports",
+      "Art & creativity",
+      "Tech & innovation",
+      "Parenting",
+      "Faith & spirituality",
+      "Social justice",
+      "Pop culture",
+      "Books & writing",
+      "Nature & outdoors",
+    ],
+  },
+  {
+    id: "skip_topics",
+    label: "Topics you'd rather skip",
+    type: "multi",
+    options: ["Politics", "Religion", "Relationships / dating", "Work stress", "None — I'm open to anything"],
+  },
+  {
+    id: "energy",
+    label: "Your social energy",
+    type: "select",
+    options: [
+      "Introvert — I recharge alone but love good conversation",
+      "Ambivert — depends on the room",
+      "Extrovert — feed me people",
+    ],
+  },
+  {
+    id: "surprise",
+    label: "Something surprising about you",
+    type: "text",
+    placeholder: "e.g. I once lived in a converted school bus for 6 months",
+  },
+  {
+    id: "hope",
+    label: "What do you hope to walk away with?",
+    type: "text",
+    placeholder: "A new friend, a business contact, a good laugh...",
+  },
+]
+
+export const MAX_TOPICS = 3
+
+export type Guest = {
+  id: number
+  name: string
+  email: string
+  age_range: string | null
+  neighborhood: string | null
+  motivation: string | null
+  talk_about: string[]
+  skip_topics: string[]
+  energy: string | null
+  surprise: string | null
+  hope: string | null
+  submitted_at: string
+}
+
+export type EventInfo = {
+  restaurant: string
+  address: string
+  date: string
+  time: string
+  maxGuests: string
+  dressCode: string
+  notes: string
+}
+
+export const emptyEventInfo: EventInfo = {
+  restaurant: "",
+  address: "",
+  date: "",
+  time: "",
+  maxGuests: "",
+  dressCode: "",
+  notes: "",
+}
+
+export type TableGroup = {
+  table: string
+  theme: string
+  why: string
+  guests: number[]
+}
