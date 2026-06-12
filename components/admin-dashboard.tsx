@@ -7,11 +7,13 @@ import {
   deleteEvent,
   deleteGuest,
   sendDinnerDetailsToTable,
+  sendFeedbackRequests,
   sendReminders,
   setEventOpen,
   updateEvent,
 } from "@/app/actions/event"
 import { EventEditor } from "@/components/event-editor"
+import { ReviewsTab } from "@/components/reviews-tab"
 import type { GuestsByEvent } from "@/components/app-shell"
 import { cn } from "@/lib/utils"
 import {
@@ -29,6 +31,7 @@ import {
   Pencil,
   Plus,
   Send,
+  Star,
   Trash2,
   Unlock,
   XCircle,
@@ -70,6 +73,22 @@ export function AdminDashboard({
   const [creating, setCreating] = useState(false)
   const [savingEvent, setSavingEvent] = useState(false)
   const [busyEventId, setBusyEventId] = useState<number | null>(null)
+  const [adminTab, setAdminTab] = useState<"dinners" | "reviews">("dinners")
+
+  // Overall average rating across every event, for the Reviews tab badge.
+  const reviewStats = useMemo(() => {
+    let total = 0
+    let count = 0
+    for (const e of events) {
+      for (const g of guestsByEvent[e.id]?.confirmedGuests ?? []) {
+        if (g.feedback_rating != null) {
+          total += g.feedback_rating
+          count++
+        }
+      }
+    }
+    return { count, avg: count ? total / count : 0 }
+  }, [events, guestsByEvent])
 
   const selectedEvent = useMemo(() => events.find((e) => e.id === selectedId) ?? null, [events, selectedId])
 
@@ -115,18 +134,61 @@ export function AdminDashboard({
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <h2 className="font-serif text-3xl text-foreground">Your Dinners</h2>
-        {!creating && (
-          <button
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            New Dinner
-          </button>
-        )}
+      <div className="mb-6 flex w-fit gap-1 rounded-xl border border-border bg-card p-1">
+        <button
+          onClick={() => setAdminTab("dinners")}
+          className={cn(
+            "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            adminTab === "dinners"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Dinners
+        </button>
+        <button
+          onClick={() => setAdminTab("reviews")}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            adminTab === "reviews"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Star className="size-3.5" aria-hidden="true" />
+          Reviews
+          {reviewStats.count > 0 && (
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+                adminTab === "reviews" ? "bg-primary-foreground/20" : "bg-secondary text-[var(--gold-dark)]",
+              )}
+            >
+              {reviewStats.avg.toFixed(1)}★
+            </span>
+          )}
+        </button>
       </div>
+
+      {adminTab === "reviews" ? (
+        <>
+          <h2 className="mb-6 font-serif text-3xl text-foreground">Reviews</h2>
+          <ReviewsTab events={events} guestsByEvent={guestsByEvent} />
+        </>
+      ) : (
+        <>
+          <div className="mb-6 flex items-center justify-between gap-4">
+            <h2 className="font-serif text-3xl text-foreground">Your Dinners</h2>
+            {!creating && (
+              <button
+                onClick={() => setCreating(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <Plus className="size-4" aria-hidden="true" />
+                New Dinner
+              </button>
+            )}
+          </div>
 
       {creating && (
         <div className="mb-7 rounded-2xl border border-border bg-card px-7 py-6">
@@ -214,6 +276,8 @@ export function AdminDashboard({
             )
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   )
@@ -343,6 +407,28 @@ function EventDetail({
     const result = await sendReminders({ eventId: event.id })
     setReminderResult(result)
     setSendingReminders(false)
+  }
+
+  const [sendingFeedback, setSendingFeedback] = useState(false)
+  const [feedbackResult, setFeedbackResult] = useState<
+    { sent: number; failed: number; skipped: number; errors: string[] } | null
+  >(null)
+
+  const handleSendFeedback = async () => {
+    setSendingFeedback(true)
+    setFeedbackResult(null)
+    const result = await sendFeedbackRequests({ eventId: event.id })
+    setFeedbackResult(result)
+    setSendingFeedback(false)
+    if (result.sent > 0) {
+      setGuests((prev) =>
+        prev.map((g) =>
+          g.confirmed && !g.cancelled && g.feedback_sent_at == null
+            ? { ...g, feedback_sent_at: new Date().toISOString() }
+            : g,
+        ),
+      )
+    }
   }
 
   const generateGroupings = async () => {
@@ -820,24 +906,51 @@ function EventDetail({
         <div className="mt-8">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-serif text-xl text-foreground">Confirmed for Dinner</h3>
-            <button
-              onClick={handleSendReminders}
-              disabled={sendingReminders}
-              className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
-            >
-              {sendingReminders ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                  Texting...
-                </>
-              ) : (
-                <>
-                  <MessageSquare className="size-3.5" aria-hidden="true" />
-                  Text day-of reminder
-                </>
-              )}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleSendReminders}
+                disabled={sendingReminders}
+                className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+              >
+                {sendingReminders ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    Texting...
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare className="size-3.5" aria-hidden="true" />
+                    Text day-of reminder
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleSendFeedback}
+                disabled={sendingFeedback}
+                className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+              >
+                {sendingFeedback ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Star className="size-3.5" aria-hidden="true" />
+                    Email review request
+                  </>
+                )}
+              </button>
+            </div>
           </div>
+          {feedbackResult && (
+            <p className="mb-4 rounded-lg border border-border bg-secondary px-4 py-2.5 text-[13px] text-foreground">
+              {feedbackResult.sent} review request{feedbackResult.sent === 1 ? "" : "s"} sent
+              {feedbackResult.failed > 0 ? ` · ${feedbackResult.failed} failed` : ""}
+              {feedbackResult.skipped > 0 ? ` · ${feedbackResult.skipped} skipped` : ""}
+              {feedbackResult.errors.length > 0 ? ` — ${feedbackResult.errors.join("; ")}` : ""}
+            </p>
+          )}
           {reminderResult && (
             <p className="mb-4 rounded-lg border border-border bg-secondary px-4 py-2.5 text-[13px] text-foreground">
               {reminderResult.sent} text{reminderResult.sent === 1 ? "" : "s"} sent
@@ -882,6 +995,35 @@ function EventDetail({
                       </span>
                     )}
                   </div>
+                  {(g.feedback_rating != null || g.feedback_sent_at) && (
+                    <div className="mt-2 flex flex-col gap-1">
+                      {g.feedback_rating != null ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="flex items-center gap-0.5" aria-label={`${g.feedback_rating} out of 5 stars`}>
+                            {[1, 2, 3, 4, 5].map((n) => (
+                              <Star
+                                key={n}
+                                className={`size-3.5 ${
+                                  n <= (g.feedback_rating ?? 0)
+                                    ? "fill-[var(--gold)] text-[var(--gold)]"
+                                    : "text-muted-foreground/40"
+                                }`}
+                                aria-hidden="true"
+                              />
+                            ))}
+                          </span>
+                          <span className="text-[12px] font-medium text-[var(--gold-dark)]">
+                            {g.feedback_rating}/5
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-[12px] text-muted-foreground">Review requested · awaiting reply</span>
+                      )}
+                      {g.feedback_comment && (
+                        <p className="text-[13px] italic text-muted-foreground">{`"${g.feedback_comment}"`}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

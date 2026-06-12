@@ -116,6 +116,10 @@ export type Guest = {
   confirmed: boolean
   confirmed_at: string | null
   table_label: string | null
+  feedback_sent_at: string | null
+  feedback_rating: number | null
+  feedback_comment: string | null
+  feedback_submitted_at: string | null
 }
 
 export type EventInfo = {

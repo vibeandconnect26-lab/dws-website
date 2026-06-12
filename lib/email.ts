@@ -147,6 +147,59 @@ function buildHtml(guest: Guest, event: EventInfo, prompts: string[] = []) {
   </div>`
 }
 
+function buildFeedbackHtml(guest: Guest, event: EventInfo) {
+  const firstName = guest.name?.split(" ")[0] || "friend"
+  const venue = event.restaurant ? ` at ${event.restaurant}` : ""
+  const feedbackBase = `${getBaseUrl()}/feedback/${guest.cancel_token}`
+
+  // Five gold stars, each linking to the feedback page with a pre-selected rating.
+  const stars = [1, 2, 3, 4, 5]
+    .map(
+      (n) =>
+        `<a href="${feedbackBase}?rating=${n}" style="text-decoration: none; font-size: 40px; line-height: 1; color: #d4af37; margin: 0 3px; font-family: Arial, sans-serif;" aria-label="${n} star${n === 1 ? "" : "s"}">&#9733;</a>`,
+    )
+    .join("")
+
+  return `
+  <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; background: #faf7f2; padding: 32px; border-radius: 16px; color: #2c2418;">
+    <h1 style="font-size: 24px; margin: 0 0 4px;">How was your dinner, ${firstName}?</h1>
+    <p style="font-size: 15px; color: #6b6253; margin: 0 0 24px; line-height: 1.5;">Thanks for joining us${venue} last night. We'd love to hear how it went — your feedback helps us craft even better tables.</p>
+
+    <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 28px 24px; margin-bottom: 20px; text-align: center; font-family: Helvetica, Arial, sans-serif;">
+      <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #b08d3a; margin: 0 0 14px; font-weight: 700;">Rate your experience</p>
+      <div style="margin: 0 0 16px;">${stars}</div>
+      <p style="font-size: 13px; color: #6b6253; margin: 0;">Tap a star to leave your rating — you can add a comment on the next screen.</p>
+    </div>
+
+    <div style="text-align: center;">
+      <a href="${feedbackBase}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Leave a review</a>
+    </div>
+
+    <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
+  </div>`
+}
+
+export async function sendFeedbackRequest(guest: Guest, event: EventInfo) {
+  if (!resend) {
+    return { ok: false, error: "RESEND_API_KEY is not configured." as string }
+  }
+  if (!guest.email) {
+    return { ok: false, error: "Guest has no email address." }
+  }
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: guest.email,
+      subject: `How was your dinner${event.restaurant ? ` at ${event.restaurant}` : ""}?`,
+      html: buildFeedbackHtml(guest, event),
+    })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." }
+  }
+}
+
 export async function sendDinnerDetails(guest: Guest, event: EventInfo, seatIndex = 0) {
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
