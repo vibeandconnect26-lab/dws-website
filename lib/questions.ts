@@ -105,6 +105,10 @@ export type Guest = {
   surprise: string | null
   hope: string | null
   submitted_at: string
+  cancel_token: string
+  cancelled: boolean
+  cancelled_at: string | null
+  details_sent_at: string | null
 }
 
 export type EventInfo = {
