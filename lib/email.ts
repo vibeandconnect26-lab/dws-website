@@ -3,8 +3,21 @@ import type { EventInfo, Guest } from "@/lib/questions"
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 
-// Default to Resend's onboarding sender so it works before a custom domain is verified.
-const FROM = process.env.EMAIL_FROM || "Vibe & Connect <onboarding@resend.dev>"
+// The verified sending domain in Resend for this project.
+const DEFAULT_FROM = "Vibe & Connect <dinners@aseatatthetable.city>"
+
+// Free mailbox providers can never be used as a sender — Resend rejects them.
+// If EMAIL_FROM is misconfigured (e.g. a gmail address), ignore it and use the verified domain.
+function resolveFrom() {
+  const configured = process.env.EMAIL_FROM?.trim()
+  if (!configured) return DEFAULT_FROM
+  const freeProviders = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "aol.com"]
+  const lower = configured.toLowerCase()
+  if (freeProviders.some((p) => lower.includes(p))) return DEFAULT_FROM
+  return configured
+}
+
+const FROM = resolveFrom()
 
 function getBaseUrl() {
   if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL.replace(/\/$/, "")
