@@ -225,8 +225,8 @@ export async function sendDinnerDetailsToTable(
   let failed = 0
   const errors: string[] = []
 
-  for (const guest of rows) {
-    const result = await sendDinnerDetails(guest, event)
+  for (const [seatIndex, guest] of rows.entries()) {
+    const result = await sendDinnerDetails(guest, event, seatIndex)
     if (result.ok) {
       sent++
       await sql`

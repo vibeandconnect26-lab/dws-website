@@ -45,7 +45,58 @@ function formatTime(time: string) {
   return parsed.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
 }
 
-function buildHtml(guest: Guest, event: EventInfo) {
+// A pool of optional conversation starters. Each guest at a table gets a
+// different trio dealt from this pool, so no two seatmates open with the same
+// questions. Keep at least 3 * (max table size) prompts for full uniqueness.
+const ICEBREAKER_POOL = [
+  "What's something you've changed your mind about in the last year?",
+  "What's a small thing that reliably makes your day better?",
+  "If you had a completely free weekend, no plans at all, how would you spend it?",
+  "What's the best meal you've had in Columbia — and where?",
+  "What's something you're looking forward to in the next few months?",
+  "What's a hobby or skill you'd love to pick up if time weren't an issue?",
+  "What's the last thing that genuinely surprised you?",
+  "Who's someone (famous or not) you'd love to share a meal with?",
+  "What's a place you've traveled to that stuck with you, and why?",
+  "What's a book, show, or song you can't stop recommending?",
+  "What did you want to be when you were a kid?",
+  "What's a tiny, oddly specific thing you're a little bit obsessed with?",
+  "What's the best piece of advice you've ever actually used?",
+  "What's something on your bucket list that might surprise people?",
+  "If you could instantly master one skill, what would it be?",
+  "What's a moment recently when you felt really proud of yourself?",
+  "What's your go-to way to unwind after a long week?",
+  "What's something you believe everyone should try at least once?",
+]
+
+// Deal `count` distinct prompts for the guest at `index` within their table.
+// We offset by index * count so seatmates never receive the same set.
+function promptsForGuest(index: number, count = 3): string[] {
+  const pool = ICEBREAKER_POOL
+  const out: string[] = []
+  for (let i = 0; i < count; i++) {
+    out.push(pool[(index * count + i) % pool.length])
+  }
+  return out
+}
+
+function buildPromptsSection(prompts: string[]) {
+  if (!prompts || prompts.length === 0) return ""
+  const items = prompts
+    .map(
+      (p) =>
+        `<li style="margin: 0 0 10px; padding-left: 4px; font-size: 15px; line-height: 1.5; color: #2c2418;">${p}</li>`,
+    )
+    .join("")
+  return `
+    <div style="background: #fff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; margin-bottom: 20px; font-family: Helvetica, Arial, sans-serif;">
+      <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #b08d3a; margin: 0 0 6px; font-weight: 700;">Conversation starters</p>
+      <p style="font-size: 13px; color: #6b6253; margin: 0 0 16px; line-height: 1.5;">Totally optional — but if you'd like a little help breaking the ice, here are three questions just for you. Yours are different from your tablemates', so swap and compare!</p>
+      <ol style="margin: 0; padding: 0 0 0 20px;">${items}</ol>
+    </div>`
+}
+
+function buildHtml(guest: Guest, event: EventInfo, prompts: string[] = []) {
   const cancelUrl = `${getBaseUrl()}/cancel/${guest.cancel_token}`
   const confirmUrl = `${getBaseUrl()}/confirm/${guest.cancel_token}`
   const dateStr = formatDate(event.date)
@@ -83,6 +134,8 @@ function buildHtml(guest: Guest, event: EventInfo) {
       </table>
     </div>
 
+    ${buildPromptsSection(prompts)}
+
     <div style="background: #fff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; text-align: center; font-family: Helvetica, Arial, sans-serif;">
       <p style="font-size: 15px; color: #2c2418; margin: 0 0 16px; font-weight: 600;">Please let us know if you can make it.</p>
       <p style="font-size: 13px; color: #6b6253; margin: 0 0 16px;">Confirming locks in your seat. If you can't make it, cancel so we can offer your spot to someone else.</p>
@@ -94,7 +147,7 @@ function buildHtml(guest: Guest, event: EventInfo) {
   </div>`
 }
 
-export async function sendDinnerDetails(guest: Guest, event: EventInfo) {
+export async function sendDinnerDetails(guest: Guest, event: EventInfo, seatIndex = 0) {
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
   }
@@ -102,11 +155,12 @@ export async function sendDinnerDetails(guest: Guest, event: EventInfo) {
     return { ok: false, error: "Guest has no email address." }
   }
   try {
+    const prompts = promptsForGuest(seatIndex)
     const { error } = await resend.emails.send({
       from: FROM,
       to: guest.email,
       subject: `Your dinner details${event.restaurant ? ` — ${event.restaurant}` : ""}`,
-      html: buildHtml(guest, event),
+      html: buildHtml(guest, event, prompts),
     })
     if (error) return { ok: false, error: error.message }
     return { ok: true }
