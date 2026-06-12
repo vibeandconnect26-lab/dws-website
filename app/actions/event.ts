@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { type EventInfo, emptyEventInfo, type Guest } from "@/lib/questions"
+import { sendDinnerDetails } from "@/lib/email"
 import { revalidatePath } from "next/cache"
 
 export async function submitGuest(formData: {
@@ -39,8 +40,10 @@ export async function submitGuest(formData: {
 export async function getGuests(): Promise<Guest[]> {
   const rows = await sql`
     SELECT id, name, email, age_range, neighborhood, motivation,
-           talk_about, skip_topics, energy, surprise, hope, submitted_at
+           talk_about, skip_topics, energy, surprise, hope, submitted_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at
     FROM guests
+    WHERE cancelled = false
     ORDER BY submitted_at ASC
   `
   return rows as Guest[]
@@ -90,5 +93,69 @@ export async function saveEventInfo(info: EventInfo) {
 export async function verifyAdmin(password: string) {
   const expected = process.env.ADMIN_PASSWORD || "vibeadmin2025"
   return { ok: password === expected }
+}
+
+export async function sendDinnerDetailsToAll(): Promise<{
+  sent: number
+  failed: number
+  errors: string[]
+}> {
+  const event = await getEventInfo()
+  if (!event.restaurant) {
+    return { sent: 0, failed: 0, errors: ["Add event details before sending."] }
+  }
+
+  const rows = (await sql`
+    SELECT id, name, email, age_range, neighborhood, motivation,
+           talk_about, skip_topics, energy, surprise, hope, submitted_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at
+    FROM guests
+    WHERE cancelled = false
+    ORDER BY submitted_at ASC
+  `) as Guest[]
+
+  let sent = 0
+  let failed = 0
+  const errors: string[] = []
+
+  for (const guest of rows) {
+    const result = await sendDinnerDetails(guest, event)
+    if (result.ok) {
+      sent++
+      await sql`UPDATE guests SET details_sent_at = now() WHERE id = ${guest.id}`
+    } else {
+      failed++
+      if (result.error && !errors.includes(result.error)) errors.push(result.error)
+    }
+  }
+
+  revalidatePath("/")
+  return { sent, failed, errors }
+}
+
+export async function getGuestByToken(token: string): Promise<Guest | null> {
+  const rows = (await sql`
+    SELECT id, name, email, age_range, neighborhood, motivation,
+           talk_about, skip_topics, energy, surprise, hope, submitted_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at
+    FROM guests
+    WHERE cancel_token = ${token}
+  `) as Guest[]
+  return rows[0] ?? null
+}
+
+export async function cancelByToken(token: string): Promise<{ ok: boolean; alreadyCancelled: boolean }> {
+  const rows = (await sql`
+    SELECT cancelled FROM guests WHERE cancel_token = ${token}
+  `) as { cancelled: boolean }[]
+
+  if (rows.length === 0) return { ok: false, alreadyCancelled: false }
+  if (rows[0].cancelled) return { ok: true, alreadyCancelled: true }
+
+  await sql`
+    UPDATE guests SET cancelled = true, cancelled_at = now() WHERE cancel_token = ${token}
+  `
+  revalidatePath("/")
+  return { ok: true, alreadyCancelled: false }
 }
 

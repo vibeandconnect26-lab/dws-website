@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { type EventInfo, type Guest, type TableGroup, emptyEventInfo } from "@/lib/questions"
-import { deleteGuest, saveEventInfo } from "@/app/actions/event"
-import { Loader2, Pencil, Trash2 } from "lucide-react"
+import { deleteGuest, saveEventInfo, sendDinnerDetailsToAll } from "@/app/actions/event"
+import { Loader2, Mail, MailCheck, Pencil, Trash2 } from "lucide-react"
 
 function formatDate(date: string, withYear = false) {
   if (!date) return "—"
@@ -46,6 +46,9 @@ export function AdminDashboard({
   const [aiError, setAiError] = useState<string | null>(null)
   const [source, setSource] = useState<"ai" | "heuristic" | null>(null)
 
+  const [sending, setSending] = useState(false)
+  const [sendResult, setSendResult] = useState<{ sent: number; failed: number; errors: string[] } | null>(null)
+
   const tablesNeeded = Math.ceil(guests.length / 7)
   const introverts = guests.filter((g) => g.energy?.startsWith("Introvert")).length
 
@@ -58,6 +61,14 @@ export function AdminDashboard({
     setEventInfo(draftEvent)
     setEditingEvent(false)
     await saveEventInfo(draftEvent)
+  }
+
+  const handleSendDetails = async () => {
+    setSending(true)
+    setSendResult(null)
+    const result = await sendDinnerDetailsToAll()
+    setSendResult(result)
+    setSending(false)
   }
 
   const generateGroupings = async () => {
@@ -178,6 +189,50 @@ export function AdminDashboard({
         </div>
       ) : (
         <>
+          {/* Send dinner details */}
+          <div className="mb-7 rounded-2xl border border-border bg-card p-7">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="font-serif text-xl text-foreground">Email Dinner Details</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Send every confirmed guest the venue, date, time, and a personal link to cancel their spot.
+                </p>
+              </div>
+              <button
+                onClick={handleSendDetails}
+                disabled={sending || !hasEvent}
+                className="inline-flex flex-shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {sending ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Mail className="size-4" aria-hidden="true" />
+                )}
+                {sending ? "Sending..." : `Send to ${guests.length} guest${guests.length === 1 ? "" : "s"}`}
+              </button>
+            </div>
+            {!hasEvent && (
+              <p className="mt-3 text-[13px] text-destructive">
+                Add event details above before sending the email.
+              </p>
+            )}
+            {sendResult && (
+              <div className="mt-4 rounded-xl border border-border bg-secondary px-5 py-4 text-sm">
+                <p className="font-medium text-foreground">
+                  {sendResult.sent} sent
+                  {sendResult.failed > 0 ? ` · ${sendResult.failed} failed` : ""}
+                </p>
+                {sendResult.errors.length > 0 && (
+                  <ul className="mt-2 list-disc pl-5 text-[13px] text-destructive">
+                    {sendResult.errors.map((e) => (
+                      <li key={e}>{e}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+
           <h3 className="mb-5 font-serif text-xl text-foreground">Guest List</h3>
           <div className="flex flex-col gap-3">
             {guests.map((g) => (
@@ -186,7 +241,21 @@ export function AdminDashboard({
                 className="flex items-start justify-between gap-4 rounded-xl border border-border bg-card px-6 py-5"
               >
                 <div className="flex-1">
-                  <div className="text-base font-semibold text-foreground">{g.name}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-base font-semibold text-foreground">{g.name}</span>
+                    {g.details_sent_at && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-[var(--gold-dark)]">
+                        <MailCheck className="size-3" aria-hidden="true" />
+                        Details sent
+                      </span>
+                    )}
+                  </div>
+                  <div className="mb-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                    <Mail className="size-3.5" aria-hidden="true" />
+                    <a href={`mailto:${g.email}`} className="hover:text-foreground hover:underline">
+                      {g.email}
+                    </a>
+                  </div>
                   <div className="mb-2 text-[13px] text-muted-foreground">
                     {[g.age_range, g.neighborhood, g.energy?.split("—")[0].trim()].filter(Boolean).join(" · ")}
                   </div>
