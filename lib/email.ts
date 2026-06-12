@@ -200,6 +200,45 @@ export async function sendFeedbackRequest(guest: Guest, event: EventInfo) {
   }
 }
 
+function buildSystemErrorHtml(guest: Guest, event: EventInfo) {
+  const firstName = guest.name?.split(" ")[0] || "friend"
+  const venue = event.restaurant ? ` for ${event.restaurant}` : ""
+  return `
+  <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; background: #faf7f2; padding: 32px; border-radius: 16px; color: #2c2418;">
+    <h1 style="font-size: 24px; margin: 0 0 4px;">Quick correction, ${firstName}</h1>
+    <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">A system error caused the dinner details${venue} we just sent you to go out by mistake. Please disregard that previous email — those details were not final.</p>
+
+    <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; margin-bottom: 20px; font-family: Helvetica, Arial, sans-serif;">
+      <p style="font-size: 15px; color: #2c2418; margin: 0 0 12px; line-height: 1.6;">Don&apos;t worry — your spot is safe. You&apos;ve been added back to the guest pool, and we&apos;ll be in touch with your confirmed table and details shortly.</p>
+      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">If someone else cancels, we&apos;ll automatically slot you back in. No action is needed on your end.</p>
+    </div>
+
+    <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">Thanks so much for your patience — we can&apos;t wait to host you.</p>
+    <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
+  </div>`
+}
+
+export async function sendSystemErrorNotice(guest: Guest, event: EventInfo) {
+  if (!resend) {
+    return { ok: false, error: "RESEND_API_KEY is not configured." as string }
+  }
+  if (!guest.email) {
+    return { ok: false, error: "Guest has no email address." }
+  }
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: guest.email,
+      subject: "Please disregard our previous email",
+      html: buildSystemErrorHtml(guest, event),
+    })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." }
+  }
+}
+
 export async function sendDinnerDetails(guest: Guest, event: EventInfo, seatIndex = 0) {
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }

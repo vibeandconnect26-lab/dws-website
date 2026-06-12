@@ -6,6 +6,7 @@ import {
   createEvent,
   deleteEvent,
   deleteGuest,
+  removeGuestFromTable,
   sendDinnerDetailsToTable,
   sendFeedbackRequests,
   sendReminders,
@@ -34,6 +35,7 @@ import {
   Star,
   Trash2,
   Unlock,
+  X,
   XCircle,
 } from "lucide-react"
 
@@ -304,8 +306,8 @@ function EventDetail({
   const [editing, setEditing] = useState(false)
   const [savingEvent, setSavingEvent] = useState(false)
   const [guests, setGuests] = useState(initialGuests)
-  const [confirmedGuests] = useState(initialConfirmed)
-  const [cancelledGuests] = useState(initialCancelled)
+  const [confirmedGuests, setConfirmedGuests] = useState(initialConfirmed)
+  const [cancelledGuests, setCancelledGuests] = useState(initialCancelled)
 
   // Source-of-truth status lookup for any guest id, used to badge the
   // grouping chips. The lists are authoritative; chip snapshots may be stale.
@@ -398,6 +400,64 @@ function EventDetail({
       .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
       .map(([label, gs]) => ({ label, guests: gs }))
   }, [guests, confirmedGuests, cancelledGuests])
+
+  const [removingGuestId, setRemovingGuestId] = useState<number | null>(null)
+  const [removeNotice, setRemoveNotice] = useState<Record<string, string>>({})
+
+  // Pull a guest off a sent table, return them to the pending pool, and email
+  // them a "system error / please disregard" notice. Reflects the change in all
+  // local lists so the UI updates without a reload.
+  const handleRemoveFromTable = async (guest: Guest) => {
+    const label = guest.table_label || ""
+    setRemovingGuestId(guest.id)
+    const result = await removeGuestFromTable(guest.id, event.id)
+    setRemovingGuestId(null)
+    if (!result.ok) {
+      if (label) setRemoveNotice((prev) => ({ ...prev, [label]: result.error || "Could not remove guest." }))
+      return
+    }
+    // Remove from confirmed/cancelled, and reset the pending copy back to the pool.
+    setConfirmedGuests((prev) => prev.filter((g) => g.id !== guest.id))
+    setCancelledGuests((prev) => prev.filter((g) => g.id !== guest.id))
+    setGuests((prev) =>
+      prev.some((g) => g.id === guest.id)
+        ? prev.map((g) =>
+            g.id === guest.id
+              ? {
+                  ...g,
+                  table_label: null,
+                  details_sent_at: null,
+                  reminder_sent_at: null,
+                  confirmed: false,
+                  confirmed_at: null,
+                  cancelled: false,
+                  cancelled_at: null,
+                }
+              : g,
+          )
+        : [
+            ...prev,
+            {
+              ...guest,
+              table_label: null,
+              details_sent_at: null,
+              reminder_sent_at: null,
+              confirmed: false,
+              confirmed_at: null,
+              cancelled: false,
+              cancelled_at: null,
+            },
+          ],
+    )
+    if (label) {
+      setRemoveNotice((prev) => ({
+        ...prev,
+        [label]: result.emailed
+          ? `${guest.name} was returned to the pool and emailed a correction notice.`
+          : `${guest.name} was returned to the pool. (Email notice could not be sent.)`,
+      }))
+    }
+  }
 
   const handleSaveEvent = async (draft: EventDraft) => {
     setSavingEvent(true)
@@ -1008,10 +1068,26 @@ function EventDetail({
                             )}
                           />
                           {g.name}
+                          <button
+                            onClick={() => handleRemoveFromTable(g)}
+                            disabled={removingGuestId === g.id}
+                            title={`Remove ${g.name} from ${t.label} and return them to the pool`}
+                            aria-label={`Remove ${g.name} from ${t.label}`}
+                            className="ml-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
+                          >
+                            {removingGuestId === g.id ? (
+                              <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <X className="size-3" aria-hidden="true" />
+                            )}
+                          </button>
                         </span>
                       )
                     })}
                   </div>
+                  {removeNotice[t.label] && (
+                    <p className="mt-3 text-[12px] text-muted-foreground">{removeNotice[t.label]}</p>
+                  )}
                 </div>
               )
             })}
