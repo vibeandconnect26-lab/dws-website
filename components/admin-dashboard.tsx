@@ -1038,50 +1038,45 @@ function EventDetail({
                     {t.guests.map((g) => {
                       const status = guestStatus(g.id)
                       return (
-                        <span
-                          key={g.id}
-                          title={
-                            status === "confirmed"
-                              ? "Confirmed"
-                              : status === "cancelled"
-                                ? "Cancelled"
-                                : "Pending reply"
-                          }
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px]",
-                            status === "confirmed"
-                              ? "border-[var(--success)]/40 bg-[var(--success)]/10 text-foreground"
-                              : status === "cancelled"
-                                ? "border-destructive/40 bg-destructive/10 text-foreground line-through decoration-destructive/50"
-                                : "border-border bg-card text-foreground",
-                          )}
-                        >
+                        <div key={g.id} className="group relative">
                           <span
-                            aria-hidden="true"
                             className={cn(
-                              "size-1.5 rounded-full",
+                              "inline-flex cursor-default items-center gap-1.5 rounded-full border px-3 py-1 text-[13px]",
                               status === "confirmed"
-                                ? "bg-[var(--success)]"
+                                ? "border-[var(--success)]/40 bg-[var(--success)]/10 text-foreground"
                                 : status === "cancelled"
-                                  ? "bg-destructive"
-                                  : "bg-muted-foreground/50",
+                                  ? "border-destructive/40 bg-destructive/10 text-foreground line-through decoration-destructive/50"
+                                  : "border-border bg-card text-foreground",
                             )}
-                          />
-                          {g.name}
-                          <button
-                            onClick={() => handleRemoveFromTable(g)}
-                            disabled={removingGuestId === g.id}
-                            title={`Remove ${g.name} from ${t.label} and return them to the pool`}
-                            aria-label={`Remove ${g.name} from ${t.label}`}
-                            className="ml-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
                           >
-                            {removingGuestId === g.id ? (
-                              <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-                            ) : (
-                              <X className="size-3" aria-hidden="true" />
-                            )}
-                          </button>
-                        </span>
+                            <span
+                              aria-hidden="true"
+                              className={cn(
+                                "size-1.5 rounded-full",
+                                status === "confirmed"
+                                  ? "bg-[var(--success)]"
+                                  : status === "cancelled"
+                                    ? "bg-destructive"
+                                    : "bg-muted-foreground/50",
+                              )}
+                            />
+                            {g.name}
+                            <button
+                              onClick={() => handleRemoveFromTable(g)}
+                              disabled={removingGuestId === g.id}
+                              title={`Remove ${g.name} from ${t.label} and return them to the pool`}
+                              aria-label={`Remove ${g.name} from ${t.label}`}
+                              className="ml-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
+                            >
+                              {removingGuestId === g.id ? (
+                                <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                              ) : (
+                                <X className="size-3" aria-hidden="true" />
+                              )}
+                            </button>
+                          </span>
+                          <GuestAnswersCard guest={g} />
+                        </div>
                       )
                     })}
                   </div>
@@ -1344,5 +1339,39 @@ function Tag({ children }: { children: React.ReactNode }) {
     <span className="rounded-full bg-[var(--gold)]/12 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--gold-dark)]">
       {children}
     </span>
+  )
+}
+
+// Hover/focus popover that surfaces a guest's questionnaire answers, so the host
+// can compare seatmates before deciding who to pull from a table.
+function GuestAnswersCard({ guest }: { guest: Guest }) {
+  const rows = questions
+    .filter((q) => q.id !== "name" && q.id !== "email")
+    .map((q) => {
+      const value = guest[q.id as keyof Guest]
+      const display = Array.isArray(value) ? value.join(", ") : value ? String(value) : null
+      return { id: q.id, label: q.label, display }
+    })
+    .filter((r) => r.display)
+
+  return (
+    <div
+      role="tooltip"
+      className="invisible absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-xl border border-border bg-popover p-4 text-left opacity-0 shadow-lg transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+    >
+      <p className="mb-2 font-serif text-sm text-foreground">{guest.name}&apos;s answers</p>
+      {rows.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">No questionnaire answers on file.</p>
+      ) : (
+        <dl className="grid gap-y-2">
+          {rows.map((r) => (
+            <div key={r.id}>
+              <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{r.label}</dt>
+              <dd className="mt-0.5 text-[12px] leading-snug text-foreground">{r.display}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
   )
 }
