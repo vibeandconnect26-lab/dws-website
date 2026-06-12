@@ -13,6 +13,7 @@ import {
   updateEvent,
 } from "@/app/actions/event"
 import { EventEditor } from "@/components/event-editor"
+import { ReviewsTab } from "@/components/reviews-tab"
 import type { GuestsByEvent } from "@/components/app-shell"
 import { cn } from "@/lib/utils"
 import {
@@ -72,6 +73,22 @@ export function AdminDashboard({
   const [creating, setCreating] = useState(false)
   const [savingEvent, setSavingEvent] = useState(false)
   const [busyEventId, setBusyEventId] = useState<number | null>(null)
+  const [adminTab, setAdminTab] = useState<"dinners" | "reviews">("dinners")
+
+  // Overall average rating across every event, for the Reviews tab badge.
+  const reviewStats = useMemo(() => {
+    let total = 0
+    let count = 0
+    for (const e of events) {
+      for (const g of guestsByEvent[e.id]?.confirmedGuests ?? []) {
+        if (g.feedback_rating != null) {
+          total += g.feedback_rating
+          count++
+        }
+      }
+    }
+    return { count, avg: count ? total / count : 0 }
+  }, [events, guestsByEvent])
 
   const selectedEvent = useMemo(() => events.find((e) => e.id === selectedId) ?? null, [events, selectedId])
 
@@ -117,18 +134,61 @@ export function AdminDashboard({
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <h2 className="font-serif text-3xl text-foreground">Your Dinners</h2>
-        {!creating && (
-          <button
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            New Dinner
-          </button>
-        )}
+      <div className="mb-6 flex w-fit gap-1 rounded-xl border border-border bg-card p-1">
+        <button
+          onClick={() => setAdminTab("dinners")}
+          className={cn(
+            "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            adminTab === "dinners"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Dinners
+        </button>
+        <button
+          onClick={() => setAdminTab("reviews")}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            adminTab === "reviews"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Star className="size-3.5" aria-hidden="true" />
+          Reviews
+          {reviewStats.count > 0 && (
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+                adminTab === "reviews" ? "bg-primary-foreground/20" : "bg-secondary text-[var(--gold-dark)]",
+              )}
+            >
+              {reviewStats.avg.toFixed(1)}★
+            </span>
+          )}
+        </button>
       </div>
+
+      {adminTab === "reviews" ? (
+        <>
+          <h2 className="mb-6 font-serif text-3xl text-foreground">Reviews</h2>
+          <ReviewsTab events={events} guestsByEvent={guestsByEvent} />
+        </>
+      ) : (
+        <>
+          <div className="mb-6 flex items-center justify-between gap-4">
+            <h2 className="font-serif text-3xl text-foreground">Your Dinners</h2>
+            {!creating && (
+              <button
+                onClick={() => setCreating(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <Plus className="size-4" aria-hidden="true" />
+                New Dinner
+              </button>
+            )}
+          </div>
 
       {creating && (
         <div className="mb-7 rounded-2xl border border-border bg-card px-7 py-6">
@@ -216,6 +276,8 @@ export function AdminDashboard({
             )
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   )
