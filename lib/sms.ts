@@ -38,7 +38,7 @@ export function buildReminderMessage(guest: Guest, event: EventInfo) {
   const dateStr = formatDate(event.date)
   const where = event.restaurant || "your dinner"
   const address = event.address ? ` (${event.address})` : ""
-  return `Hi ${firstName}! Reminder from Vibe & Connect: your Dinner with Strangers is today, ${dateStr} at ${timeStr}, at ${where}${address}. We can't wait to see you there!`
+  return `Hi ${firstName}! Reminder from Vibe & Connect: your Dinner with Strangers is today, ${dateStr} at ${timeStr}, at ${where}${address}. We can't wait to see you there! This number is not monitored, so please do not reply. Need to cancel? Use the link in your confirmation email.`
 }
 
 export async function sendReminderSms(guest: Guest, event: EventInfo) {
