@@ -1,10 +1,10 @@
 import { getGuestByToken, getEventForGuestToken } from "@/app/actions/event"
-import { CancelView } from "@/components/cancel-view"
+import { ConfirmView } from "@/components/confirm-view"
 import { notFound } from "next/navigation"
 
 export const dynamic = "force-dynamic"
 
-export default async function CancelPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function ConfirmPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
   const [guest, eventInfo] = await Promise.all([getGuestByToken(token), getEventForGuestToken(token)])
 
@@ -12,5 +12,5 @@ export default async function CancelPage({ params }: { params: Promise<{ token: 
     notFound()
   }
 
-  return <CancelView guest={guest} eventInfo={eventInfo} token={token} />
+  return <ConfirmView guest={guest} eventInfo={eventInfo} token={token} />
 }

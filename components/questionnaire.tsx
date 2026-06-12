@@ -25,7 +25,13 @@ function formatTime(time: string) {
 
 type Answers = Record<string, string | string[]>
 
-export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
+export function Questionnaire({
+  eventInfo,
+  onChangeEvent,
+}: {
+  eventInfo: EventInfo
+  onChangeEvent?: () => void
+}) {
   const [answers, setAnswers] = useState<Answers>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
@@ -46,6 +52,8 @@ export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
         if (!answers[q.id] || (answers[q.id] as string[]).length === 0) e[q.id] = "Pick at least one"
       } else if (!answers[q.id] || !answers[q.id].toString().trim()) {
         e[q.id] = "Required"
+      } else if (q.id === "phone" && (answers[q.id] as string).replace(/\D/g, "").length < 10) {
+        e[q.id] = "Enter a valid mobile number so we can text you a reminder"
       }
     })
     return e
@@ -61,8 +69,10 @@ export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
     setPending(true)
     try {
       await submitGuest({
+        eventId: eventInfo.id,
         name: (answers.name as string) ?? "",
         email: (answers.email as string) ?? "",
+        phone: (answers.phone as string) ?? "",
         age_range: (answers.age_range as string) ?? "",
         neighborhood: (answers.neighborhood as string) ?? "",
         motivation: (answers.motivation as string) ?? "",
@@ -87,10 +97,18 @@ export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
           <CheckCircle2 className="mx-auto mb-4 size-12 text-[var(--success)]" aria-hidden="true" />
           <h2 className="mb-2 font-serif text-3xl text-primary">{"You're on the list."}</h2>
           <p className="leading-relaxed text-muted-foreground">
-            {"We'll review your answers and place you at the perfect table."}
+            {"We'll review your answers and curate tables for this dinner."}
             <br />
-            Expect a confirmation from Vibe &amp; Connect closer to the event.
+            If you&apos;re selected, you&apos;ll get a confirmation email with all the details.
           </p>
+          <div className="mx-auto mt-6 max-w-md rounded-xl border border-[var(--gold)]/40 bg-[var(--gold)]/8 px-5 py-4 text-left">
+            <p className="text-[13px] leading-relaxed text-foreground">
+              <span className="font-semibold text-[var(--gold-dark)]">Please note:</span> a spot at this dinner
+              isn&apos;t guaranteed. We thoughtfully curate each table for the best mix, so signing up reserves your
+              place in the pool — not a seat. If you aren&apos;t selected for this date, we&apos;d love for you to sign
+              up for another dinner.
+            </p>
+          </div>
         </div>
       </div>
     )
@@ -100,7 +118,7 @@ export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
-      <div className="mb-12 text-center">
+      <div className="mb-8 text-center">
         <p className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-[var(--gold-dark)]">
           Columbia, SC · Dinner with Strangers
         </p>
@@ -116,11 +134,27 @@ export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
       </div>
 
       {hasEvent && (
-        <div className="mb-8 flex flex-wrap justify-center gap-8 rounded-xl border border-border bg-card px-6 py-5">
-          <EventFact label="Venue" value={eventInfo.restaurant} sub={eventInfo.address} />
-          {eventInfo.date && <EventFact label="Date" value={formatDate(eventInfo.date)} />}
-          {eventInfo.time && <EventFact label="Time" value={formatTime(eventInfo.time)} />}
-          {eventInfo.dressCode && <EventFact label="Dress Code" value={eventInfo.dressCode} />}
+        <div className="mb-8 rounded-xl border border-border bg-card px-6 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--gold-dark)]">
+              You&apos;re signing up for
+            </p>
+            {onChangeEvent && (
+              <button
+                type="button"
+                onClick={onChangeEvent}
+                className="text-[13px] font-semibold text-[var(--gold-dark)] underline-offset-2 hover:underline"
+              >
+                Change dinner
+              </button>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap justify-center gap-8">
+            <EventFact label="Venue" value={eventInfo.restaurant} sub={eventInfo.address} />
+            {eventInfo.date && <EventFact label="Date" value={formatDate(eventInfo.date)} />}
+            {eventInfo.time && <EventFact label="Time" value={formatTime(eventInfo.time)} />}
+            {eventInfo.dressCode && <EventFact label="Dress Code" value={eventInfo.dressCode} />}
+          </div>
         </div>
       )}
 
@@ -186,6 +220,11 @@ export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
         ))}
 
         {errors.form && <p className="text-[13px] text-destructive">{errors.form}</p>}
+
+        <p className="rounded-xl border border-border bg-secondary/50 px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
+          Heads up: seats are curated for the best mix, so a spot isn&apos;t guaranteed. We&apos;ll email you if
+          you&apos;re selected for this dinner.
+        </p>
 
         <button
           type="button"

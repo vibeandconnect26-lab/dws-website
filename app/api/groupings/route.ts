@@ -25,16 +25,18 @@ function energyRank(energy: string | null): number {
 
 // Deterministic fallback: balances social energy across tables and themes
 // each table around the interest its members most commonly share.
-function heuristicGroupings(guests: Guest[]): TableGroup[] {
-  const tablesNeeded = Math.ceil(guests.length / 7)
+function heuristicGroupings(guests: Guest[], tableSize: number): TableGroup[] {
+  const tablesNeeded = Math.max(1, Math.floor(guests.length / tableSize))
 
   // Sort by energy so a round-robin spread mixes introverts/extroverts evenly.
   const ordered = guests
     .map((g, i) => ({ g, num: i + 1 }))
     .sort((a, b) => energyRank(b.g.energy) - energyRank(a.g.energy))
 
+  // Only seat full tables of exactly tableSize; leftovers stay unseated.
+  const seatable = ordered.slice(0, tablesNeeded * tableSize)
   const buckets: { g: Guest; num: number }[][] = Array.from({ length: tablesNeeded }, () => [])
-  ordered.forEach((entry, idx) => {
+  seatable.forEach((entry, idx) => {
     buckets[idx % tablesNeeded].push(entry)
   })
 
@@ -66,13 +68,25 @@ function heuristicGroupings(guests: Guest[]): TableGroup[] {
 }
 
 export async function POST(req: Request) {
-  const { guests } = (await req.json()) as { guests: Guest[] }
+  const { guests, tableSize: rawSize } = (await req.json()) as { guests: Guest[]; tableSize?: number }
 
   if (!guests || guests.length < 2) {
     return Response.json({ error: "Need at least 2 guests." }, { status: 400 })
   }
 
-  const tablesNeeded = Math.ceil(guests.length / 7)
+  const tableSize = rawSize && rawSize > 0 ? Math.floor(rawSize) : 7
+
+  if (guests.length < tableSize) {
+    return Response.json(
+      {
+        error: `You need at least ${tableSize} guest${tableSize === 1 ? "" : "s"} (your table size) to form a table. You currently have ${guests.length}.`,
+      },
+      { status: 400 },
+    )
+  }
+
+  const tablesNeeded = Math.floor(guests.length / tableSize)
+  const seatedCount = tablesNeeded * tableSize
 
   const guestSummaries = guests
     .map(
@@ -85,12 +99,12 @@ export async function POST(req: Request) {
     )
     .join("\n")
 
-  const prompt = `You are helping Vibe and Connect, a community social events company in Columbia, SC, group dinner guests into tables of 6-8 people for a "Dinner with Strangers" event.
+  const prompt = `You are helping Vibe and Connect, a community social events company in Columbia, SC, group dinner guests into tables for a "Dinner with Strangers" event.
 
 Guests:
 ${guestSummaries}
 
-Create ${tablesNeeded} balanced table${tablesNeeded > 1 ? "s" : ""}. Mix ages, neighborhoods, and energy types. Align each table around shared interests. Avoid pairing guests where one wants to skip a topic the other loves. Every guest must be assigned to exactly one table.`
+Create exactly ${tablesNeeded} table${tablesNeeded > 1 ? "s" : ""}, and each table MUST have exactly ${tableSize} guests (no more, no fewer). That means you will seat exactly ${seatedCount} of the ${guests.length} guests; if there are leftover guests who don't fill a complete table of ${tableSize}, simply leave them unassigned (do not include them in any table). Mix ages, neighborhoods, and energy types. Align each table around shared interests. Avoid pairing guests where one wants to skip a topic the other loves. Each seated guest must appear in exactly one table, and no guest number may be repeated across tables.`
 
   try {
     const { object } = await generateObject({
@@ -98,10 +112,10 @@ Create ${tablesNeeded} balanced table${tablesNeeded > 1 ? "s" : ""}. Mix ages, n
       schema: tableSchema,
       prompt,
     })
-    return Response.json({ ...object, source: "ai" })
+    return Response.json({ ...object, source: "ai", tableSize })
   } catch (err) {
     console.log("[v0] AI gateway unavailable, using heuristic fallback:", err)
-    const tables = heuristicGroupings(guests)
-    return Response.json({ tables, source: "heuristic" })
+    const tables = heuristicGroupings(guests, tableSize)
+    return Response.json({ tables, source: "heuristic", tableSize })
   }
 }

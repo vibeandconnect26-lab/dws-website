@@ -11,6 +11,7 @@ export type Question = {
 export const questions: Question[] = [
   { id: "name", label: "Full Name", type: "text", placeholder: "Your name" },
   { id: "email", label: "Email Address", type: "text", placeholder: "your@email.com" },
+  { id: "phone", label: "Mobile Number", type: "text", placeholder: "(803) 555-0142" },
   { id: "age_range", label: "Age Range", type: "select", options: ["25–34", "35–44", "45–54", "55–64", "65+"] },
   {
     id: "neighborhood",
@@ -94,8 +95,10 @@ export const MAX_TOPICS = 3
 
 export type Guest = {
   id: number
+  event_id: number | null
   name: string
   email: string
+  phone: string | null
   age_range: string | null
   neighborhood: string | null
   motivation: string | null
@@ -109,9 +112,14 @@ export type Guest = {
   cancelled: boolean
   cancelled_at: string | null
   details_sent_at: string | null
+  reminder_sent_at: string | null
+  confirmed: boolean
+  confirmed_at: string | null
+  table_label: string | null
 }
 
 export type EventInfo = {
+  id: number
   restaurant: string
   address: string
   date: string
@@ -119,9 +127,11 @@ export type EventInfo = {
   maxGuests: string
   dressCode: string
   notes: string
+  isOpen: boolean
 }
 
 export const emptyEventInfo: EventInfo = {
+  id: 0,
   restaurant: "",
   address: "",
   date: "",
@@ -129,6 +139,21 @@ export const emptyEventInfo: EventInfo = {
   maxGuests: "",
   dressCode: "",
   notes: "",
+  isOpen: true,
+}
+
+// A new (unsaved) event uses id 0; saving assigns a real id.
+export type EventDraft = Omit<EventInfo, "id">
+
+export const emptyEventDraft: EventDraft = {
+  restaurant: "",
+  address: "",
+  date: "",
+  time: "",
+  maxGuests: "",
+  dressCode: "",
+  notes: "",
+  isOpen: true,
 }
 
 export type TableGroup = {
