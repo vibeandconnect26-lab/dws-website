@@ -6,6 +6,7 @@ import {
   createEvent,
   deleteEvent,
   deleteGuest,
+  removeGuestFromTable,
   sendDinnerDetailsToTable,
   sendFeedbackRequests,
   sendReminders,
@@ -34,6 +35,7 @@ import {
   Star,
   Trash2,
   Unlock,
+  X,
   XCircle,
 } from "lucide-react"
 
@@ -304,8 +306,8 @@ function EventDetail({
   const [editing, setEditing] = useState(false)
   const [savingEvent, setSavingEvent] = useState(false)
   const [guests, setGuests] = useState(initialGuests)
-  const [confirmedGuests] = useState(initialConfirmed)
-  const [cancelledGuests] = useState(initialCancelled)
+  const [confirmedGuests, setConfirmedGuests] = useState(initialConfirmed)
+  const [cancelledGuests, setCancelledGuests] = useState(initialCancelled)
 
   // Source-of-truth status lookup for any guest id, used to badge the
   // grouping chips. The lists are authoritative; chip snapshots may be stale.
@@ -344,15 +346,22 @@ function EventDetail({
   const handleFillSeat = async (cancelledGuest: Guest) => {
     const pendingId = fillSelection[cancelledGuest.id]
     if (!pendingId) return
-    const replacement = guests.find((g) => g.id === pendingId)
+    const replacement = unseatedGuests.find((g) => g.id === pendingId)
     if (!replacement) return
     const tableLabel = cancelledGuest.table_label || "Table 1"
     setFillingSeat(cancelledGuest.id)
     const result = await sendDinnerDetailsToTable([replacement.id], tableLabel, event.id)
     setFillingSeat(null)
     if (result.sent > 0) {
-      // The replacement now holds the seat; drop them from the pending pool.
-      setGuests((prev) => prev.filter((g) => g.id !== replacement.id))
+      // The replacement now holds the seat: stamp them as emailed + seated so
+      // they leave the pending list and appear in their new table.
+      setGuests((prev) =>
+        prev.map((g) =>
+          g.id === replacement.id
+            ? { ...g, details_sent_at: new Date().toISOString(), table_label: tableLabel }
+            : g,
+        ),
+      )
       setFilledSeats((prev) => ({
         ...prev,
         [cancelledGuest.id]: `${replacement.name} was added to ${tableLabel} and emailed their details.`,
@@ -372,6 +381,83 @@ function EventDetail({
 
   const tableSize = Math.max(0, Number.parseInt(event.maxGuests || "0", 10) || 0)
   const tablesPossible = tableSize > 0 ? Math.floor(guests.length / tableSize) : 0
+
+  // Pending guests who haven't been emailed a table yet. Once a table is sent,
+  // its guests stay in the database but drop off the active pending list.
+  const unseatedGuests = useMemo(() => guests.filter((g) => !g.details_sent_at), [guests])
+
+  // Reconstruct emailed tables from each guest's persisted table_label across
+  // every list, so the generated tables stay on the page (with live confirm
+  // status) even after a reload.
+  const sentTables = useMemo(() => {
+    const map = new Map<string, Guest[]>()
+    for (const g of [...guests, ...confirmedGuests, ...cancelledGuests]) {
+      if (!g.table_label) continue
+      if (!map.has(g.table_label)) map.set(g.table_label, [])
+      map.get(g.table_label)!.push(g)
+    }
+    return [...map.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+      .map(([label, gs]) => ({ label, guests: gs }))
+  }, [guests, confirmedGuests, cancelledGuests])
+
+  const [removingGuestId, setRemovingGuestId] = useState<number | null>(null)
+  const [removeNotice, setRemoveNotice] = useState<Record<string, string>>({})
+
+  // Pull a guest off a sent table, return them to the pending pool, and email
+  // them a "system error / please disregard" notice. Reflects the change in all
+  // local lists so the UI updates without a reload.
+  const handleRemoveFromTable = async (guest: Guest) => {
+    const label = guest.table_label || ""
+    setRemovingGuestId(guest.id)
+    const result = await removeGuestFromTable(guest.id, event.id)
+    setRemovingGuestId(null)
+    if (!result.ok) {
+      if (label) setRemoveNotice((prev) => ({ ...prev, [label]: result.error || "Could not remove guest." }))
+      return
+    }
+    // Remove from confirmed/cancelled, and reset the pending copy back to the pool.
+    setConfirmedGuests((prev) => prev.filter((g) => g.id !== guest.id))
+    setCancelledGuests((prev) => prev.filter((g) => g.id !== guest.id))
+    setGuests((prev) =>
+      prev.some((g) => g.id === guest.id)
+        ? prev.map((g) =>
+            g.id === guest.id
+              ? {
+                  ...g,
+                  table_label: null,
+                  details_sent_at: null,
+                  reminder_sent_at: null,
+                  confirmed: false,
+                  confirmed_at: null,
+                  cancelled: false,
+                  cancelled_at: null,
+                }
+              : g,
+          )
+        : [
+            ...prev,
+            {
+              ...guest,
+              table_label: null,
+              details_sent_at: null,
+              reminder_sent_at: null,
+              confirmed: false,
+              confirmed_at: null,
+              cancelled: false,
+              cancelled_at: null,
+            },
+          ],
+    )
+    if (label) {
+      setRemoveNotice((prev) => ({
+        ...prev,
+        [label]: result.emailed
+          ? `${guest.name} was returned to the pool and emailed a correction notice.`
+          : `${guest.name} was returned to the pool. (Email notice could not be sent.)`,
+      }))
+    }
+  }
 
   const handleSaveEvent = async (draft: EventDraft) => {
     setSavingEvent(true)
@@ -432,7 +518,7 @@ function EventDetail({
   }
 
   const generateGroupings = async () => {
-    if (guests.length < 2) return
+    if (unseatedGuests.length < 2) return
     if (tableSize <= 0) {
       setAiError("Set a 'Table Size' value in the event details first — that number is your table size.")
       return
@@ -445,7 +531,7 @@ function EventDetail({
     // Preserve locked tables and exclude their guests from re-grouping.
     const lockedTables = (parsedTables ?? []).filter((t) => t.locked)
     const lockedGuestIds = new Set(lockedTables.flatMap((t) => t.guestObjects.map((g) => g.id)))
-    const guestsToGroup = guests.filter((g) => !lockedGuestIds.has(g.id))
+    const guestsToGroup = unseatedGuests.filter((g) => !lockedGuestIds.has(g.id))
 
     if (guestsToGroup.length < 2) {
       setAiError("All remaining guests are in locked tables. Unlock a table to re-group them.")
@@ -472,7 +558,7 @@ function EventDetail({
       const combined = relabelTables([...lockedTables, ...generated])
       setParsedTables(combined)
       const seated = combined.reduce((sum, t) => sum + t.guestObjects.length, 0)
-      setUnseatedCount(Math.max(0, guests.length - seated))
+      setUnseatedCount(Math.max(0, unseatedGuests.length - seated))
     } catch (e) {
       setAiError(e instanceof Error && e.message ? e.message : "Could not generate groupings. Please try again.")
     } finally {
@@ -592,24 +678,26 @@ function EventDetail({
 
       {/* Stats */}
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat num={guests.length} label="Pending Guests" />
+        <Stat num={unseatedGuests.length} label="Pending Guests" />
         <Stat num={tableSize > 0 ? tablesPossible : "—"} label={`Full Tables of ${tableSize || "?"}`} />
         <Stat num={confirmedGuests.length} label="Confirmed" />
       </div>
 
-      {guests.length === 0 ? (
+      {unseatedGuests.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">
-          No pending guests for this dinner yet. Share the questionnaire to start collecting RSVPs.
+          {guests.length === 0 && confirmedGuests.length === 0
+            ? "No pending guests for this dinner yet. Share the questionnaire to start collecting RSVPs."
+            : "Everyone has been emailed a table. See your tables below."}
         </div>
       ) : (
         <>
           <h3 className="mb-1.5 font-serif text-xl text-foreground">Pending Guests</h3>
           <p className="mb-5 text-sm text-muted-foreground">
             These guests haven&apos;t been seated yet. Generate table groupings below, then email each table their
-            details. Once a guest confirms or cancels from that email, they drop off this list automatically.
+            details. Once a guest is emailed a table, they move to &quot;Your Tables&quot; and drop off this list.
           </p>
           <div className="flex flex-col gap-3">
-            {guests.map((g) => (
+            {unseatedGuests.map((g) => (
               <div
                 key={g.id}
                 className="flex items-start justify-between gap-4 rounded-xl border border-border bg-card px-6 py-5"
@@ -704,7 +792,7 @@ function EventDetail({
                 )}
                 <button
                   onClick={generateGroupings}
-                  disabled={loading || guests.length < 2}
+                  disabled={loading || unseatedGuests.length < 2}
                   className="rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {loading ? "Thinking..." : parsedTables ? "Re-generate" : "Generate groupings"}
@@ -901,6 +989,111 @@ function EventDetail({
         </>
       )}
 
+      {/* Your Tables — emailed tables reconstructed from persisted data, with live status */}
+      {sentTables.length > 0 && (
+        <div className="mt-8">
+          <h3 className="mb-1 font-serif text-xl text-foreground">Your Tables</h3>
+          <p className="mb-3 text-[13px] text-muted-foreground">
+            Tables you&apos;ve emailed, saved here for easy reference. Each shows the dinner location and where each
+            guest stands.
+          </p>
+          <div className="mb-4 flex flex-wrap items-center gap-4 text-[12px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-[var(--success)]" aria-hidden="true" />
+              Confirmed
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+              Pending reply
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-destructive" aria-hidden="true" />
+              Cancelled
+            </span>
+          </div>
+          <div className="flex flex-col gap-4">
+            {sentTables.map((t) => {
+              const confirmedCount = t.guests.filter((g) => guestStatus(g.id) === "confirmed").length
+              return (
+                <div key={t.label} className="rounded-xl border border-border bg-secondary/40 p-5">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="font-serif text-lg text-foreground">{t.label}</h4>
+                    <span className="text-[12px] text-muted-foreground">
+                      {confirmedCount}/{t.guests.length} confirmed
+                    </span>
+                  </div>
+                  <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+                    {event.date && (
+                      <span className="flex items-center gap-1.5 font-medium text-foreground">
+                        <CalendarDays className="size-3.5" aria-hidden="true" />
+                        {formatDate(event.date, true)}
+                      </span>
+                    )}
+                    {event.restaurant && (
+                      <span className="flex items-center gap-1.5 font-medium text-foreground">
+                        <MapPin className="size-3.5" aria-hidden="true" />
+                        {event.restaurant}
+                      </span>
+                    )}
+                    {event.address && <span>{event.address}</span>}
+                    {event.time && <span>{formatTime(event.time)}</span>}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {t.guests.map((g) => {
+                      const status = guestStatus(g.id)
+                      return (
+                        <div key={g.id} className="group relative">
+                          <span
+                            className={cn(
+                              "inline-flex cursor-default items-center gap-1.5 rounded-full border px-3 py-1 text-[13px]",
+                              status === "confirmed"
+                                ? "border-[var(--success)]/40 bg-[var(--success)]/10 text-foreground"
+                                : status === "cancelled"
+                                  ? "border-destructive/40 bg-destructive/10 text-foreground line-through decoration-destructive/50"
+                                  : "border-border bg-card text-foreground",
+                            )}
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={cn(
+                                "size-1.5 rounded-full",
+                                status === "confirmed"
+                                  ? "bg-[var(--success)]"
+                                  : status === "cancelled"
+                                    ? "bg-destructive"
+                                    : "bg-muted-foreground/50",
+                              )}
+                            />
+                            {g.name}
+                            <button
+                              onClick={() => handleRemoveFromTable(g)}
+                              disabled={removingGuestId === g.id}
+                              title={`Remove ${g.name} from ${t.label} and return them to the pool`}
+                              aria-label={`Remove ${g.name} from ${t.label}`}
+                              className="ml-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
+                            >
+                              {removingGuestId === g.id ? (
+                                <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                              ) : (
+                                <X className="size-3" aria-hidden="true" />
+                              )}
+                            </button>
+                          </span>
+                          <GuestAnswersCard guest={g} />
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {removeNotice[t.label] && (
+                    <p className="mt-3 text-[12px] text-muted-foreground">{removeNotice[t.label]}</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Confirmed guests */}
       {confirmedGuests.length > 0 && (
         <div className="mt-8">
@@ -1070,7 +1263,7 @@ function EventDetail({
                     <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-foreground">
                       {filled}
                     </p>
-                  ) : guests.length === 0 ? (
+                  ) : unseatedGuests.length === 0 ? (
                     <p className="mt-3 text-[13px] text-muted-foreground">
                       No pending guests available to fill this seat.
                     </p>
@@ -1091,7 +1284,7 @@ function EventDetail({
                         className="rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] outline-none transition-colors focus:border-[var(--gold)]"
                       >
                         <option value="">Pick a replacement…</option>
-                        {guests.map((p) => (
+                        {unseatedGuests.map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.name}
                           </option>
@@ -1150,5 +1343,39 @@ function Tag({ children }: { children: React.ReactNode }) {
     <span className="rounded-full bg-[var(--gold)]/12 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--gold-dark)]">
       {children}
     </span>
+  )
+}
+
+// Hover/focus popover that surfaces a guest's questionnaire answers, so the host
+// can compare seatmates before deciding who to pull from a table.
+function GuestAnswersCard({ guest }: { guest: Guest }) {
+  const rows = questions
+    .filter((q) => q.id !== "name" && q.id !== "email")
+    .map((q) => {
+      const value = guest[q.id as keyof Guest]
+      const display = Array.isArray(value) ? value.join(", ") : value ? String(value) : null
+      return { id: q.id, label: q.label, display }
+    })
+    .filter((r) => r.display)
+
+  return (
+    <div
+      role="tooltip"
+      className="invisible absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-xl border border-border bg-popover p-4 text-left opacity-0 shadow-lg transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+    >
+      <p className="mb-2 font-serif text-sm text-foreground">{guest.name}&apos;s answers</p>
+      {rows.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">No questionnaire answers on file.</p>
+      ) : (
+        <dl className="grid gap-y-2">
+          {rows.map((r) => (
+            <div key={r.id}>
+              <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{r.label}</dt>
+              <dd className="mt-0.5 text-[12px] leading-snug text-foreground">{r.display}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
   )
 }

@@ -2,7 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { type EventInfo, type EventDraft, emptyEventInfo, type Guest } from "@/lib/questions"
-import { sendDinnerDetails, sendFeedbackRequest } from "@/lib/email"
+import { sendDinnerDetails, sendFeedbackRequest, sendSystemErrorNotice } from "@/lib/email"
 import { normalizePhone, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
@@ -265,6 +265,47 @@ export async function sendDinnerDetailsToTable(
 
   revalidatePath("/")
   return { sent, failed, errors }
+}
+
+// Removes a guest from a sent table and returns them to the pending pool.
+// Clears their table assignment + sent/confirm/cancel state, then emails a
+// "please disregard / system error" notice letting them know they're safe.
+export async function removeGuestFromTable(
+  guestId: number,
+  eventId: number,
+): Promise<{ ok: boolean; emailed: boolean; error?: string }> {
+  const rows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)}
+    FROM guests
+    WHERE id = ${guestId}
+  `) as Guest[]
+  const guest = rows[0]
+  if (!guest) return { ok: false, emailed: false, error: "Guest not found." }
+
+  // Return them to the pending pool: clear the table + all send/RSVP state.
+  await sql`
+    UPDATE guests
+    SET table_label = NULL,
+        details_sent_at = NULL,
+        reminder_sent_at = NULL,
+        confirmed = false,
+        confirmed_at = NULL,
+        cancelled = false,
+        cancelled_at = NULL
+    WHERE id = ${guestId}
+  `
+
+  let emailed = false
+  let error: string | undefined
+  const event = await getEvent(eventId)
+  if (event && guest.email) {
+    const result = await sendSystemErrorNotice(guest, event)
+    emailed = result.ok
+    if (!result.ok) error = result.error
+  }
+
+  revalidatePath("/")
+  return { ok: true, emailed, error }
 }
 
 export async function getGuestByToken(token: string): Promise<Guest | null> {
