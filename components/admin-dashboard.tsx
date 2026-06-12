@@ -243,6 +243,14 @@ function EventDetail({
   const [confirmedGuests] = useState(initialConfirmed)
   const [cancelledGuests] = useState(initialCancelled)
 
+  // Source-of-truth status lookup for any guest id, used to badge the
+  // grouping chips. The lists are authoritative; chip snapshots may be stale.
+  const guestStatus = (id: number): "confirmed" | "cancelled" | "pending" => {
+    if (confirmedGuests.some((g) => g.id === id)) return "confirmed"
+    if (cancelledGuests.some((g) => g.id === id)) return "cancelled"
+    return "pending"
+  }
+
   const [loading, setLoading] = useState(false)
   const [parsedTables, setParsedTables] = useState<ParsedTable[] | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
@@ -623,9 +631,25 @@ function EventDetail({
               their dinner details.
             </p>
             {parsedTables && (
-              <p className="mt-2 text-[13px] text-muted-foreground">
-                Drag guests between tables to rearrange them. Lock a table to protect it when you re-generate.
-              </p>
+              <>
+                <p className="mt-2 text-[13px] text-muted-foreground">
+                  Drag guests between tables to rearrange them. Lock a table to protect it when you re-generate.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-4 text-[12px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-[var(--success)]" aria-hidden="true" />
+                    Confirmed
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+                    Pending reply
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-destructive" aria-hidden="true" />
+                    Cancelled
+                  </span>
+                </div>
+              </>
             )}
 
             {loading && (
@@ -726,25 +750,53 @@ function EventDetail({
                         </p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          {table.guestObjects.map((g) => (
-                            <span
-                              key={g.id}
-                              draggable={!table.locked}
-                              onDragStart={() => setDragging({ guestId: g.id, fromTable: table.table })}
-                              onDragEnd={() => {
-                                setDragging(null)
-                                setDragOverTable(null)
-                              }}
-                              className={cn(
-                                "inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-[13px] text-foreground",
-                                table.locked ? "cursor-default" : "cursor-grab active:cursor-grabbing",
-                                dragging?.guestId === g.id && "opacity-40",
-                              )}
-                            >
-                              {!table.locked && <GripVertical className="size-3 text-muted-foreground" aria-hidden="true" />}
-                              {g.name}
-                            </span>
-                          ))}
+                          {table.guestObjects.map((g) => {
+                            const status = guestStatus(g.id)
+                            return (
+                              <span
+                                key={g.id}
+                                draggable={!table.locked}
+                                onDragStart={() => setDragging({ guestId: g.id, fromTable: table.table })}
+                                onDragEnd={() => {
+                                  setDragging(null)
+                                  setDragOverTable(null)
+                                }}
+                                title={
+                                  status === "confirmed"
+                                    ? "Confirmed"
+                                    : status === "cancelled"
+                                      ? "Cancelled"
+                                      : "Pending reply"
+                                }
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px]",
+                                  table.locked ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+                                  dragging?.guestId === g.id && "opacity-40",
+                                  status === "confirmed"
+                                    ? "border-[var(--success)]/40 bg-[var(--success)]/10 text-foreground"
+                                    : status === "cancelled"
+                                      ? "border-destructive/40 bg-destructive/10 text-foreground line-through decoration-destructive/50"
+                                      : "border-border bg-card text-foreground",
+                                )}
+                              >
+                                {!table.locked && (
+                                  <GripVertical className="size-3 text-muted-foreground" aria-hidden="true" />
+                                )}
+                                <span
+                                  aria-hidden="true"
+                                  className={cn(
+                                    "size-1.5 rounded-full",
+                                    status === "confirmed"
+                                      ? "bg-[var(--success)]"
+                                      : status === "cancelled"
+                                        ? "bg-destructive"
+                                        : "bg-muted-foreground/50",
+                                  )}
+                                />
+                                {g.name}
+                              </span>
+                            )
+                          })}
                         </div>
                       )}
                       {result && (
