@@ -13,11 +13,14 @@ import {
 } from "@/app/actions/event"
 import { EventEditor } from "@/components/event-editor"
 import type { GuestsByEvent } from "@/components/app-shell"
+import { cn } from "@/lib/utils"
 import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
+  GripVertical,
   Loader2,
+  Lock,
   Mail,
   MailCheck,
   MapPin,
@@ -26,6 +29,7 @@ import {
   Plus,
   Send,
   Trash2,
+  Unlock,
 } from "lucide-react"
 
 function formatDate(date: string, withYear = false) {
@@ -206,7 +210,7 @@ export function AdminDashboard({
   )
 }
 
-type ParsedTable = TableGroup & { guestObjects: Guest[] }
+type ParsedTable = TableGroup & { guestObjects: Guest[]; locked?: boolean }
 
 function EventDetail({
   event: initialEvent,
@@ -237,6 +241,10 @@ function EventDetail({
   const [tableResults, setTableResults] = useState<
     Record<string, { sent: number; failed: number; errors: string[] }>
   >({})
+
+  // Manual grouping: which guest is being dragged, and the table they came from.
+  const [dragging, setDragging] = useState<{ guestId: number; fromTable: string } | null>(null)
+  const [dragOverTable, setDragOverTable] = useState<string | null>(null)
 
   const [sendingReminders, setSendingReminders] = useState(false)
   const [reminderResult, setReminderResult] = useState<
@@ -289,32 +297,96 @@ function EventDetail({
       return
     }
     setLoading(true)
-    setParsedTables(null)
     setAiError(null)
     setSource(null)
     setUnseatedCount(0)
+
+    // Preserve locked tables and exclude their guests from re-grouping.
+    const lockedTables = (parsedTables ?? []).filter((t) => t.locked)
+    const lockedGuestIds = new Set(lockedTables.flatMap((t) => t.guestObjects.map((g) => g.id)))
+    const guestsToGroup = guests.filter((g) => !lockedGuestIds.has(g.id))
+
+    if (guestsToGroup.length < 2) {
+      setAiError("All remaining guests are in locked tables. Unlock a table to re-group them.")
+      setLoading(false)
+      return
+    }
+
     try {
       const res = await fetch("/api/groupings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guests, tableSize }),
+        body: JSON.stringify({ guests: guestsToGroup, tableSize }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       const tables: TableGroup[] = data.tables
       setSource(data.source === "ai" ? "ai" : "heuristic")
-      const parsed = tables.map((t) => ({
+      // The grouping API returns 1-based indexes into guestsToGroup.
+      const generated: ParsedTable[] = tables.map((t) => ({
         ...t,
-        guestObjects: t.guests.map((idx) => guests[idx - 1]).filter(Boolean),
+        guestObjects: t.guests.map((idx) => guestsToGroup[idx - 1]).filter(Boolean),
+        locked: false,
       }))
-      setParsedTables(parsed)
-      const seated = parsed.reduce((sum, t) => sum + t.guestObjects.length, 0)
+      const combined = relabelTables([...lockedTables, ...generated])
+      setParsedTables(combined)
+      const seated = combined.reduce((sum, t) => sum + t.guestObjects.length, 0)
       setUnseatedCount(Math.max(0, guests.length - seated))
     } catch (e) {
       setAiError(e instanceof Error && e.message ? e.message : "Could not generate groupings. Please try again.")
     } finally {
       setLoading(false)
     }
+  }
+
+  // Keep table labels sequential after add/remove/re-generate.
+  const relabelTables = (tables: ParsedTable[]): ParsedTable[] =>
+    tables.map((t, i) => ({ ...t, table: `Table ${i + 1}` }))
+
+  const toggleLock = (tableName: string) => {
+    setParsedTables((prev) =>
+      prev ? prev.map((t) => (t.table === tableName ? { ...t, locked: !t.locked } : t)) : prev,
+    )
+  }
+
+  const addEmptyTable = () => {
+    setParsedTables((prev) => {
+      const base = prev ?? []
+      const next: ParsedTable = {
+        table: `Table ${base.length + 1}`,
+        theme: "Hand-picked",
+        why: "Manually arranged by the host.",
+        guests: [],
+        guestObjects: [],
+        locked: false,
+      }
+      return [...base, next]
+    })
+  }
+
+  const moveGuest = (guestId: number, fromTable: string, toTable: string) => {
+    if (fromTable === toTable) return
+    setParsedTables((prev) => {
+      if (!prev) return prev
+      const guest = prev.find((t) => t.table === fromTable)?.guestObjects.find((g) => g.id === guestId)
+      if (!guest) return prev
+      return prev.map((t) => {
+        if (t.table === fromTable) {
+          return { ...t, guestObjects: t.guestObjects.filter((g) => g.id !== guestId) }
+        }
+        if (t.table === toTable) {
+          if (t.guestObjects.some((g) => g.id === guestId)) return t
+          return { ...t, guestObjects: [...t.guestObjects, guest] }
+        }
+        return t
+      })
+    })
+  }
+
+  const handleDropOnTable = (toTable: string) => {
+    if (dragging) moveGuest(dragging.guestId, dragging.fromTable, toTable)
+    setDragging(null)
+    setDragOverTable(null)
   }
 
   return (
@@ -441,19 +513,35 @@ function EventDetail({
           <div className="mt-8 rounded-2xl border border-border bg-card p-7">
             <div className="mb-3 flex items-center justify-between gap-4">
               <h3 className="font-serif text-xl text-foreground">AI Table Groupings</h3>
-              <button
-                onClick={generateGroupings}
-                disabled={loading || guests.length < 2}
-                className="rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? "Thinking..." : parsedTables ? "Re-generate" : "Generate groupings"}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                {parsedTables && (
+                  <button
+                    onClick={addEmptyTable}
+                    className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)]"
+                  >
+                    <Plus className="size-3.5" aria-hidden="true" />
+                    Add table
+                  </button>
+                )}
+                <button
+                  onClick={generateGroupings}
+                  disabled={loading || guests.length < 2}
+                  className="rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loading ? "Thinking..." : parsedTables ? "Re-generate" : "Generate groupings"}
+                </button>
+              </div>
             </div>
             <p className="text-sm text-muted-foreground">
               Claude builds tables of exactly {tableSize > 0 ? tableSize : "your table size"} guest
               {tableSize === 1 ? "" : "s"}, balanced by interests, energy, and neighborhood. Then email each table
               their dinner details.
             </p>
+            {parsedTables && (
+              <p className="mt-2 text-[13px] text-muted-foreground">
+                Drag guests between tables to rearrange them. Lock a table to protect it when you re-generate.
+              </p>
+            )}
 
             {loading && (
               <div className="flex items-center gap-2.5 py-4 text-sm text-muted-foreground">
@@ -474,42 +562,106 @@ function EventDetail({
                 )}
                 {parsedTables.map((table) => {
                   const result = tableResults[table.table]
+                  const isOver = dragOverTable === table.table
                   return (
-                    <div key={table.table} className="rounded-xl border border-border bg-secondary/40 p-5">
+                    <div
+                      key={table.table}
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        if (!table.locked) setDragOverTable(table.table)
+                      }}
+                      onDragLeave={() => setDragOverTable((cur) => (cur === table.table ? null : cur))}
+                      onDrop={() => {
+                        if (!table.locked) handleDropOnTable(table.table)
+                      }}
+                      className={cn(
+                        "rounded-xl border p-5 transition-colors",
+                        isOver && !table.locked
+                          ? "border-[var(--gold)] bg-[var(--gold)]/8"
+                          : "border-border bg-secondary/40",
+                        table.locked && "border-[var(--gold)]/50",
+                      )}
+                    >
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <h4 className="font-serif text-lg text-foreground">{table.table}</h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-serif text-lg text-foreground">{table.table}</h4>
+                            <span className="text-[12px] text-muted-foreground">
+                              {table.guestObjects.length} guest{table.guestObjects.length === 1 ? "" : "s"}
+                            </span>
+                            {table.locked && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--gold)]/12 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--gold-dark)]">
+                                <Lock className="size-3" aria-hidden="true" />
+                                Locked
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[13px] italic text-[var(--gold-dark)]">{table.theme}</p>
                         </div>
-                        <button
-                          onClick={() => handleSendTable(table)}
-                          disabled={sendingTable === table.table}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-1.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                        >
-                          {sendingTable === table.table ? (
-                            <>
-                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                              Sending...
-                            </>
-                          ) : (
-                            <>
-                              <Send className="size-3.5" aria-hidden="true" />
-                              Email this table
-                            </>
-                          )}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => toggleLock(table.table)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)]"
+                          >
+                            {table.locked ? (
+                              <>
+                                <Unlock className="size-3.5" aria-hidden="true" />
+                                Unlock
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="size-3.5" aria-hidden="true" />
+                                Lock
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleSendTable(table)}
+                            disabled={sendingTable === table.table || table.guestObjects.length === 0}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-1.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                          >
+                            {sendingTable === table.table ? (
+                              <>
+                                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                                Sending...
+                              </>
+                            ) : (
+                              <>
+                                <Send className="size-3.5" aria-hidden="true" />
+                                Email this table
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                       <p className="mb-3 text-[13px] text-muted-foreground">{table.why}</p>
-                      <div className="flex flex-wrap gap-2">
-                        {table.guestObjects.map((g) => (
-                          <span
-                            key={g.id}
-                            className="rounded-full border border-border bg-card px-3 py-1 text-[13px] text-foreground"
-                          >
-                            {g.name}
-                          </span>
-                        ))}
-                      </div>
+                      {table.guestObjects.length === 0 ? (
+                        <p className="rounded-lg border border-dashed border-border px-3 py-3 text-center text-[13px] text-muted-foreground">
+                          Empty table — drag guests here.
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {table.guestObjects.map((g) => (
+                            <span
+                              key={g.id}
+                              draggable={!table.locked}
+                              onDragStart={() => setDragging({ guestId: g.id, fromTable: table.table })}
+                              onDragEnd={() => {
+                                setDragging(null)
+                                setDragOverTable(null)
+                              }}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-[13px] text-foreground",
+                                table.locked ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+                                dragging?.guestId === g.id && "opacity-40",
+                              )}
+                            >
+                              {!table.locked && <GripVertical className="size-3 text-muted-foreground" aria-hidden="true" />}
+                              {g.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {result && (
                         <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-foreground">
                           {result.sent} sent

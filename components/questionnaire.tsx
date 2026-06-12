@@ -97,10 +97,18 @@ export function Questionnaire({
           <CheckCircle2 className="mx-auto mb-4 size-12 text-[var(--success)]" aria-hidden="true" />
           <h2 className="mb-2 font-serif text-3xl text-primary">{"You're on the list."}</h2>
           <p className="leading-relaxed text-muted-foreground">
-            {"We'll review your answers and place you at the perfect table."}
+            {"We'll review your answers and curate tables for this dinner."}
             <br />
-            Expect a confirmation from Vibe &amp; Connect closer to the event.
+            If you&apos;re selected, you&apos;ll get a confirmation email with all the details.
           </p>
+          <div className="mx-auto mt-6 max-w-md rounded-xl border border-[var(--gold)]/40 bg-[var(--gold)]/8 px-5 py-4 text-left">
+            <p className="text-[13px] leading-relaxed text-foreground">
+              <span className="font-semibold text-[var(--gold-dark)]">Please note:</span> a spot at this dinner
+              isn&apos;t guaranteed. We thoughtfully curate each table for the best mix, so signing up reserves your
+              place in the pool — not a seat. If you aren&apos;t selected for this date, we&apos;d love for you to sign
+              up for another dinner.
+            </p>
+          </div>
         </div>
       </div>
     )
@@ -212,6 +220,11 @@ export function Questionnaire({
         ))}
 
         {errors.form && <p className="text-[13px] text-destructive">{errors.form}</p>}
+
+        <p className="rounded-xl border border-border bg-secondary/50 px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
+          Heads up: seats are curated for the best mix, so a spot isn&apos;t guaranteed. We&apos;ll email you if
+          you&apos;re selected for this dinner.
+        </p>
 
         <button
           type="button"
