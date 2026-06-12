@@ -11,6 +11,7 @@ export type Question = {
 export const questions: Question[] = [
   { id: "name", label: "Full Name", type: "text", placeholder: "Your name" },
   { id: "email", label: "Email Address", type: "text", placeholder: "your@email.com" },
+  { id: "phone", label: "Mobile Number", type: "text", placeholder: "(803) 555-0142" },
   { id: "age_range", label: "Age Range", type: "select", options: ["25–34", "35–44", "45–54", "55–64", "65+"] },
   {
     id: "neighborhood",
@@ -96,6 +97,7 @@ export type Guest = {
   id: number
   name: string
   email: string
+  phone: string | null
   age_range: string | null
   neighborhood: string | null
   motivation: string | null
@@ -109,6 +111,7 @@ export type Guest = {
   cancelled: boolean
   cancelled_at: string | null
   details_sent_at: string | null
+  reminder_sent_at: string | null
   confirmed: boolean
   confirmed_at: string | null
   table_label: string | null

@@ -46,6 +46,8 @@ export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
         if (!answers[q.id] || (answers[q.id] as string[]).length === 0) e[q.id] = "Pick at least one"
       } else if (!answers[q.id] || !answers[q.id].toString().trim()) {
         e[q.id] = "Required"
+      } else if (q.id === "phone" && (answers[q.id] as string).replace(/\D/g, "").length < 10) {
+        e[q.id] = "Enter a valid mobile number so we can text you a reminder"
       }
     })
     return e
@@ -63,6 +65,7 @@ export function Questionnaire({ eventInfo }: { eventInfo: EventInfo }) {
       await submitGuest({
         name: (answers.name as string) ?? "",
         email: (answers.email as string) ?? "",
+        phone: (answers.phone as string) ?? "",
         age_range: (answers.age_range as string) ?? "",
         neighborhood: (answers.neighborhood as string) ?? "",
         motivation: (answers.motivation as string) ?? "",

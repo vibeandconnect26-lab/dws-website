@@ -3,11 +3,13 @@
 import { sql } from "@/lib/db"
 import { type EventInfo, emptyEventInfo, type Guest } from "@/lib/questions"
 import { sendDinnerDetails } from "@/lib/email"
+import { normalizePhone, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
 export async function submitGuest(formData: {
   name: string
   email: string
+  phone: string
   age_range: string
   neighborhood: string
   motivation: string
@@ -19,10 +21,11 @@ export async function submitGuest(formData: {
 }) {
   await sql`
     INSERT INTO guests
-      (name, email, age_range, neighborhood, motivation, talk_about, skip_topics, energy, surprise, hope)
+      (name, email, phone, age_range, neighborhood, motivation, talk_about, skip_topics, energy, surprise, hope)
     VALUES (
       ${formData.name},
       ${formData.email},
+      ${normalizePhone(formData.phone)},
       ${formData.age_range},
       ${formData.neighborhood},
       ${formData.motivation},
@@ -39,9 +42,9 @@ export async function submitGuest(formData: {
 
 export async function getGuests(): Promise<Guest[]> {
   const rows = await sql`
-    SELECT id, name, email, age_range, neighborhood, motivation,
+    SELECT id, name, email, phone, age_range, neighborhood, motivation,
            talk_about, skip_topics, energy, surprise, hope, submitted_at,
-           cancel_token, cancelled, cancelled_at, details_sent_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at, reminder_sent_at,
            confirmed, confirmed_at, table_label
     FROM guests
     WHERE cancelled = false AND confirmed = false
@@ -52,9 +55,9 @@ export async function getGuests(): Promise<Guest[]> {
 
 export async function getConfirmedGuests(): Promise<Guest[]> {
   const rows = await sql`
-    SELECT id, name, email, age_range, neighborhood, motivation,
+    SELECT id, name, email, phone, age_range, neighborhood, motivation,
            talk_about, skip_topics, energy, surprise, hope, submitted_at,
-           cancel_token, cancelled, cancelled_at, details_sent_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at, reminder_sent_at,
            confirmed, confirmed_at, table_label
     FROM guests
     WHERE cancelled = false AND confirmed = true
@@ -126,9 +129,9 @@ export async function sendDinnerDetailsToTable(
   }
 
   const rows = (await sql`
-    SELECT id, name, email, age_range, neighborhood, motivation,
+    SELECT id, name, email, phone, age_range, neighborhood, motivation,
            talk_about, skip_topics, energy, surprise, hope, submitted_at,
-           cancel_token, cancelled, cancelled_at, details_sent_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at, reminder_sent_at,
            confirmed, confirmed_at, table_label
     FROM guests
     WHERE id = ANY(${guestIds}) AND cancelled = false
@@ -159,9 +162,9 @@ export async function sendDinnerDetailsToTable(
 
 export async function getGuestByToken(token: string): Promise<Guest | null> {
   const rows = (await sql`
-    SELECT id, name, email, age_range, neighborhood, motivation,
+    SELECT id, name, email, phone, age_range, neighborhood, motivation,
            talk_about, skip_topics, energy, surprise, hope, submitted_at,
-           cancel_token, cancelled, cancelled_at, details_sent_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at, reminder_sent_at,
            confirmed, confirmed_at, table_label
     FROM guests
     WHERE cancel_token = ${token}
@@ -185,6 +188,60 @@ export async function confirmByToken(
   `
   revalidatePath("/")
   return { ok: true, alreadyConfirmed: false, cancelled: false }
+}
+
+export async function sendReminders(opts?: { onlyUnsent?: boolean }): Promise<{
+  sent: number
+  failed: number
+  skipped: number
+  errors: string[]
+}> {
+  const event = await getEventInfo()
+  if (!event.restaurant) {
+    return { sent: 0, failed: 0, skipped: 0, errors: ["Add event details before sending reminders."] }
+  }
+
+  // Only confirmed, non-cancelled guests get a day-of reminder.
+  const guests = (await sql`
+    SELECT id, name, email, phone, age_range, neighborhood, motivation,
+           talk_about, skip_topics, energy, surprise, hope, submitted_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at, reminder_sent_at,
+           confirmed, confirmed_at, table_label
+    FROM guests
+    WHERE cancelled = false AND confirmed = true
+    ORDER BY confirmed_at ASC
+  `) as Guest[]
+
+  let sent = 0
+  let failed = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  for (const guest of guests) {
+    // When triggered by cron we avoid double-texting anyone already reminded.
+    if (opts?.onlyUnsent && guest.reminder_sent_at) {
+      skipped++
+      continue
+    }
+    if (!normalizePhone(guest.phone)) {
+      skipped++
+      if (!errors.includes("Some guests have no valid mobile number.")) {
+        errors.push("Some guests have no valid mobile number.")
+      }
+      continue
+    }
+    const result = await sendReminderSms(guest, event)
+    if (result.ok) {
+      sent++
+      await sql`UPDATE guests SET reminder_sent_at = now() WHERE id = ${guest.id}`
+    } else {
+      failed++
+      if (result.error && !errors.includes(result.error)) errors.push(result.error)
+    }
+  }
+
+  revalidatePath("/")
+  return { sent, failed, skipped, errors }
 }
 
 export async function cancelByToken(token: string): Promise<{ ok: boolean; alreadyCancelled: boolean }> {

@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { type EventInfo, type Guest, type TableGroup, emptyEventInfo } from "@/lib/questions"
-import { deleteGuest, saveEventInfo, sendDinnerDetailsToTable } from "@/app/actions/event"
-import { CheckCircle2, Loader2, Mail, MailCheck, Pencil, Send, Trash2 } from "lucide-react"
+import { deleteGuest, saveEventInfo, sendDinnerDetailsToTable, sendReminders } from "@/app/actions/event"
+import { CheckCircle2, Loader2, Mail, MailCheck, MessageSquare, Pencil, Send, Trash2 } from "lucide-react"
 
 function formatDate(date: string, withYear = false) {
   if (!date) return "—"
@@ -55,6 +55,12 @@ export function AdminDashboard({
     Record<string, { sent: number; failed: number; errors: string[] }>
   >({})
 
+  // Day-of text reminder state.
+  const [sendingReminders, setSendingReminders] = useState(false)
+  const [reminderResult, setReminderResult] = useState<
+    { sent: number; failed: number; skipped: number; errors: string[] } | null
+  >(null)
+
   const tableSize = Math.max(0, Number.parseInt(eventInfo.maxGuests || "0", 10) || 0)
   const tablesPossible = tableSize > 0 ? Math.floor(guests.length / tableSize) : 0
 
@@ -81,6 +87,14 @@ export function AdminDashboard({
         prev.map((g) => (ids.includes(g.id) ? { ...g, details_sent_at: new Date().toISOString() } : g)),
       )
     }
+  }
+
+  const handleSendReminders = async () => {
+    setSendingReminders(true)
+    setReminderResult(null)
+    const result = await sendReminders()
+    setReminderResult(result)
+    setSendingReminders(false)
   }
 
   const generateGroupings = async () => {
@@ -382,11 +396,33 @@ export function AdminDashboard({
           {/* Confirmed guests */}
           {confirmedGuests.length > 0 && (
             <div className="mt-8">
-              <h3 className="mb-1.5 font-serif text-xl text-foreground">Confirmed for Dinner</h3>
-              <p className="mb-5 text-sm text-muted-foreground">
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-3">
+                <h3 className="font-serif text-xl text-foreground">Confirmed for Dinner</h3>
+                <button
+                  onClick={handleSendReminders}
+                  disabled={sendingReminders || !hasEvent}
+                  className="inline-flex flex-shrink-0 items-center gap-2 rounded-xl border-[1.5px] border-[var(--gold)] bg-[var(--gold)]/10 px-4 py-2 text-[13px] font-semibold text-[var(--gold-dark)] transition-colors hover:bg-[var(--gold)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {sendingReminders ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <MessageSquare className="size-4" aria-hidden="true" />
+                  )}
+                  {sendingReminders ? "Texting..." : "Text day-of reminder"}
+                </button>
+              </div>
+              <p className="mb-3 text-sm text-muted-foreground">
                 {confirmedGuests.length} guest{confirmedGuests.length === 1 ? " has" : "s have"} confirmed their
-                seat from the email.
+                seat from the email. A reminder text also sends automatically the morning of the event.
               </p>
+              {reminderResult && (
+                <p className="mb-4 rounded-lg border border-border bg-secondary px-4 py-2.5 text-[13px] text-foreground">
+                  {reminderResult.sent} text{reminderResult.sent === 1 ? "" : "s"} sent
+                  {reminderResult.failed > 0 ? ` · ${reminderResult.failed} failed` : ""}
+                  {reminderResult.skipped > 0 ? ` · ${reminderResult.skipped} skipped` : ""}
+                  {reminderResult.errors.length > 0 ? ` — ${reminderResult.errors.join("; ")}` : ""}
+                </p>
+              )}
               <div className="flex flex-col gap-3">
                 {confirmedGuests.map((g) => (
                   <div
@@ -406,11 +442,24 @@ export function AdminDashboard({
                           </span>
                         )}
                       </div>
-                      <div className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
-                        <Mail className="size-3.5" aria-hidden="true" />
-                        <a href={`mailto:${g.email}`} className="hover:text-foreground hover:underline">
-                          {g.email}
-                        </a>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <Mail className="size-3.5" aria-hidden="true" />
+                          <a href={`mailto:${g.email}`} className="hover:text-foreground hover:underline">
+                            {g.email}
+                          </a>
+                        </span>
+                        {g.phone && (
+                          <span className="flex items-center gap-1.5">
+                            <MessageSquare className="size-3.5" aria-hidden="true" />
+                            <a href={`tel:${g.phone}`} className="hover:text-foreground hover:underline">
+                              {g.phone}
+                            </a>
+                            {g.reminder_sent_at && (
+                              <span className="text-[var(--gold-dark)]">· reminded</span>
+                            )}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
