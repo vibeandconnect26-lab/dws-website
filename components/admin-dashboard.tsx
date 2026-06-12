@@ -933,10 +933,24 @@ function EventDetail({
       {sentTables.length > 0 && (
         <div className="mt-8">
           <h3 className="mb-1 font-serif text-xl text-foreground">Your Tables</h3>
-          <p className="mb-4 text-[13px] text-muted-foreground">
+          <p className="mb-3 text-[13px] text-muted-foreground">
             Tables you&apos;ve emailed, saved here for easy reference. Each shows the dinner location and where each
             guest stands.
           </p>
+          <div className="mb-4 flex flex-wrap items-center gap-4 text-[12px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-[var(--success)]" aria-hidden="true" />
+              Confirmed
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+              Pending reply
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-destructive" aria-hidden="true" />
+              Cancelled
+            </span>
+          </div>
           <div className="flex flex-col gap-4">
             {sentTables.map((t) => {
               const confirmedCount = t.guests.filter((g) => guestStatus(g.id) === "confirmed").length
