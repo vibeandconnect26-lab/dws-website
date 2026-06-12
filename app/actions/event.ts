@@ -2,7 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { type EventInfo, type EventDraft, emptyEventInfo, type Guest } from "@/lib/questions"
-import { sendDinnerDetails } from "@/lib/email"
+import { sendDinnerDetails, sendFeedbackRequest } from "@/lib/email"
 import { normalizePhone, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
@@ -10,7 +10,8 @@ const GUEST_COLUMNS = `
   id, event_id, name, email, phone, age_range, neighborhood, motivation,
   talk_about, skip_topics, energy, surprise, hope, submitted_at,
   cancel_token, cancelled, cancelled_at, details_sent_at, reminder_sent_at,
-  confirmed, confirmed_at, table_label
+  confirmed, confirmed_at, table_label,
+  feedback_sent_at, feedback_rating, feedback_comment, feedback_submitted_at
 `
 
 type EventRow = {
@@ -373,4 +374,89 @@ export async function cancelByToken(token: string): Promise<{ ok: boolean; alrea
   `
   revalidatePath("/")
   return { ok: true, alreadyCancelled: false }
+}
+
+// Sends the post-event review request to everyone who attended (confirmed,
+// not cancelled). When triggered by cron we skip anyone already emailed.
+export async function sendFeedbackRequests(opts?: { eventId?: number; onlyUnsent?: boolean }): Promise<{
+  sent: number
+  failed: number
+  skipped: number
+  errors: string[]
+}> {
+  let sent = 0
+  let failed = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  const events = opts?.eventId
+    ? ([await getEvent(opts.eventId)].filter(Boolean) as EventInfo[])
+    : await getEvents()
+
+  for (const event of events) {
+    if (!event.restaurant) continue
+
+    const guests = (await sql`
+      SELECT ${sql.unsafe(GUEST_COLUMNS)}
+      FROM guests
+      WHERE event_id = ${event.id} AND cancelled = false AND confirmed = true
+      ORDER BY confirmed_at ASC
+    `) as Guest[]
+
+    for (const guest of guests) {
+      if (opts?.onlyUnsent && guest.feedback_sent_at) {
+        skipped++
+        continue
+      }
+      if (!guest.email) {
+        skipped++
+        if (!errors.includes("Some guests have no email address.")) {
+          errors.push("Some guests have no email address.")
+        }
+        continue
+      }
+      const result = await sendFeedbackRequest(guest, event)
+      if (result.ok) {
+        sent++
+        await sql`UPDATE guests SET feedback_sent_at = now() WHERE id = ${guest.id}`
+      } else {
+        failed++
+        if (result.error && !errors.includes(result.error)) errors.push(result.error)
+      }
+    }
+  }
+
+  if (!opts?.eventId && events.length === 0) {
+    errors.push("No events found.")
+  }
+
+  revalidatePath("/")
+  return { sent, failed, skipped, errors }
+}
+
+// Records a guest's star rating (1–5) and optional comment from the feedback page.
+export async function submitFeedback(
+  token: string,
+  rating: number,
+  comment: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const safeRating = Math.round(rating)
+  if (!Number.isFinite(safeRating) || safeRating < 1 || safeRating > 5) {
+    return { ok: false, error: "Please choose a rating between 1 and 5 stars." }
+  }
+
+  const rows = (await sql`
+    SELECT id FROM guests WHERE cancel_token = ${token}
+  `) as { id: number }[]
+  if (rows.length === 0) return { ok: false, error: "We couldn't find your reservation." }
+
+  await sql`
+    UPDATE guests
+    SET feedback_rating = ${safeRating},
+        feedback_comment = ${comment.trim() || null},
+        feedback_submitted_at = now()
+    WHERE cancel_token = ${token}
+  `
+  revalidatePath("/")
+  return { ok: true }
 }

@@ -7,6 +7,7 @@ import {
   deleteEvent,
   deleteGuest,
   sendDinnerDetailsToTable,
+  sendFeedbackRequests,
   sendReminders,
   setEventOpen,
   updateEvent,
@@ -29,6 +30,7 @@ import {
   Pencil,
   Plus,
   Send,
+  Star,
   Trash2,
   Unlock,
   XCircle,
@@ -343,6 +345,28 @@ function EventDetail({
     const result = await sendReminders({ eventId: event.id })
     setReminderResult(result)
     setSendingReminders(false)
+  }
+
+  const [sendingFeedback, setSendingFeedback] = useState(false)
+  const [feedbackResult, setFeedbackResult] = useState<
+    { sent: number; failed: number; skipped: number; errors: string[] } | null
+  >(null)
+
+  const handleSendFeedback = async () => {
+    setSendingFeedback(true)
+    setFeedbackResult(null)
+    const result = await sendFeedbackRequests({ eventId: event.id })
+    setFeedbackResult(result)
+    setSendingFeedback(false)
+    if (result.sent > 0) {
+      setGuests((prev) =>
+        prev.map((g) =>
+          g.confirmed && !g.cancelled && g.feedback_sent_at == null
+            ? { ...g, feedback_sent_at: new Date().toISOString() }
+            : g,
+        ),
+      )
+    }
   }
 
   const generateGroupings = async () => {
@@ -820,24 +844,51 @@ function EventDetail({
         <div className="mt-8">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-serif text-xl text-foreground">Confirmed for Dinner</h3>
-            <button
-              onClick={handleSendReminders}
-              disabled={sendingReminders}
-              className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
-            >
-              {sendingReminders ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                  Texting...
-                </>
-              ) : (
-                <>
-                  <MessageSquare className="size-3.5" aria-hidden="true" />
-                  Text day-of reminder
-                </>
-              )}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleSendReminders}
+                disabled={sendingReminders}
+                className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+              >
+                {sendingReminders ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    Texting...
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare className="size-3.5" aria-hidden="true" />
+                    Text day-of reminder
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleSendFeedback}
+                disabled={sendingFeedback}
+                className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+              >
+                {sendingFeedback ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Star className="size-3.5" aria-hidden="true" />
+                    Email review request
+                  </>
+                )}
+              </button>
+            </div>
           </div>
+          {feedbackResult && (
+            <p className="mb-4 rounded-lg border border-border bg-secondary px-4 py-2.5 text-[13px] text-foreground">
+              {feedbackResult.sent} review request{feedbackResult.sent === 1 ? "" : "s"} sent
+              {feedbackResult.failed > 0 ? ` · ${feedbackResult.failed} failed` : ""}
+              {feedbackResult.skipped > 0 ? ` · ${feedbackResult.skipped} skipped` : ""}
+              {feedbackResult.errors.length > 0 ? ` — ${feedbackResult.errors.join("; ")}` : ""}
+            </p>
+          )}
           {reminderResult && (
             <p className="mb-4 rounded-lg border border-border bg-secondary px-4 py-2.5 text-[13px] text-foreground">
               {reminderResult.sent} text{reminderResult.sent === 1 ? "" : "s"} sent
@@ -882,6 +933,35 @@ function EventDetail({
                       </span>
                     )}
                   </div>
+                  {(g.feedback_rating != null || g.feedback_sent_at) && (
+                    <div className="mt-2 flex flex-col gap-1">
+                      {g.feedback_rating != null ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="flex items-center gap-0.5" aria-label={`${g.feedback_rating} out of 5 stars`}>
+                            {[1, 2, 3, 4, 5].map((n) => (
+                              <Star
+                                key={n}
+                                className={`size-3.5 ${
+                                  n <= (g.feedback_rating ?? 0)
+                                    ? "fill-[var(--gold)] text-[var(--gold)]"
+                                    : "text-muted-foreground/40"
+                                }`}
+                                aria-hidden="true"
+                              />
+                            ))}
+                          </span>
+                          <span className="text-[12px] font-medium text-[var(--gold-dark)]">
+                            {g.feedback_rating}/5
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-[12px] text-muted-foreground">Review requested · awaiting reply</span>
+                      )}
+                      {g.feedback_comment && (
+                        <p className="text-[13px] italic text-muted-foreground">{`"${g.feedback_comment}"`}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
