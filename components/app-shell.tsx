@@ -5,20 +5,25 @@ import Image from "next/image"
 import { type EventInfo, type Guest } from "@/lib/questions"
 import { verifyAdmin } from "@/app/actions/event"
 import { Questionnaire } from "@/components/questionnaire"
+import { EventPicker } from "@/components/event-picker"
 import { AdminDashboard } from "@/components/admin-dashboard"
 import { cn } from "@/lib/utils"
 import { Lock } from "lucide-react"
 
 type View = "form" | "admin"
 
+export type GuestsByEvent = Record<number, { guests: Guest[]; confirmedGuests: Guest[] }>
+
 export function AppShell({
-  guests,
-  confirmedGuests,
-  eventInfo,
+  events,
+  openEvents,
+  counts,
+  guestsByEvent,
 }: {
-  guests: Guest[]
-  confirmedGuests: Guest[]
-  eventInfo: EventInfo
+  events: EventInfo[]
+  openEvents: EventInfo[]
+  counts: Record<number, { pending: number; confirmed: number }>
+  guestsByEvent: GuestsByEvent
 }) {
   const [view, setView] = useState<View>("form")
   const [adminUnlocked, setAdminUnlocked] = useState(false)
@@ -26,6 +31,13 @@ export function AppShell({
   const [pinInput, setPinInput] = useState("")
   const [pinError, setPinError] = useState(false)
   const [checking, setChecking] = useState(false)
+
+  // The event the public guest is signing up for. Auto-select when only one is open.
+  const [selectedEvent, setSelectedEvent] = useState<EventInfo | null>(
+    openEvents.length === 1 ? openEvents[0] : null,
+  )
+
+  const totalPending = Object.values(counts).reduce((sum, c) => sum + c.pending, 0)
 
   const handleAdminClick = () => {
     if (adminUnlocked) {
@@ -81,15 +93,22 @@ export function AppShell({
             )}
           >
             {!adminUnlocked && <Lock className="size-3.5" aria-hidden="true" />}
-            {adminUnlocked ? `Admin (${guests.length})` : "Admin"}
+            {adminUnlocked ? `Admin (${totalPending})` : "Admin"}
           </button>
         </div>
       </header>
 
       {view === "form" ? (
-        <Questionnaire eventInfo={eventInfo} />
+        selectedEvent ? (
+          <Questionnaire
+            eventInfo={selectedEvent}
+            onChangeEvent={openEvents.length > 1 ? () => setSelectedEvent(null) : undefined}
+          />
+        ) : (
+          <EventPicker events={openEvents} onSelect={(e) => setSelectedEvent(e)} />
+        )
       ) : (
-        <AdminDashboard guests={guests} confirmedGuests={confirmedGuests} eventInfo={eventInfo} />
+        <AdminDashboard events={events} counts={counts} guestsByEvent={guestsByEvent} />
       )}
 
       {showPinModal && (

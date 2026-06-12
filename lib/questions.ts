@@ -95,6 +95,7 @@ export const MAX_TOPICS = 3
 
 export type Guest = {
   id: number
+  event_id: number | null
   name: string
   email: string
   phone: string | null
@@ -118,6 +119,7 @@ export type Guest = {
 }
 
 export type EventInfo = {
+  id: number
   restaurant: string
   address: string
   date: string
@@ -125,9 +127,11 @@ export type EventInfo = {
   maxGuests: string
   dressCode: string
   notes: string
+  isOpen: boolean
 }
 
 export const emptyEventInfo: EventInfo = {
+  id: 0,
   restaurant: "",
   address: "",
   date: "",
@@ -135,6 +139,21 @@ export const emptyEventInfo: EventInfo = {
   maxGuests: "",
   dressCode: "",
   notes: "",
+  isOpen: true,
+}
+
+// A new (unsaved) event uses id 0; saving assigns a real id.
+export type EventDraft = Omit<EventInfo, "id">
+
+export const emptyEventDraft: EventDraft = {
+  restaurant: "",
+  address: "",
+  date: "",
+  time: "",
+  maxGuests: "",
+  dressCode: "",
+  notes: "",
+  isOpen: true,
 }
 
 export type TableGroup = {
