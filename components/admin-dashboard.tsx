@@ -1022,18 +1022,22 @@ function EventDetail({
                       {confirmedCount}/{t.guests.length} confirmed
                     </span>
                   </div>
-                  {(event.restaurant || event.address) && (
-                    <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
-                      {event.restaurant && (
-                        <span className="flex items-center gap-1.5 font-medium text-foreground">
-                          <MapPin className="size-3.5" aria-hidden="true" />
-                          {event.restaurant}
-                        </span>
-                      )}
-                      {event.address && <span>{event.address}</span>}
-                      {event.time && <span>{formatTime(event.time)}</span>}
-                    </div>
-                  )}
+                  <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+                    {event.date && (
+                      <span className="flex items-center gap-1.5 font-medium text-foreground">
+                        <CalendarDays className="size-3.5" aria-hidden="true" />
+                        {formatDate(event.date, true)}
+                      </span>
+                    )}
+                    {event.restaurant && (
+                      <span className="flex items-center gap-1.5 font-medium text-foreground">
+                        <MapPin className="size-3.5" aria-hidden="true" />
+                        {event.restaurant}
+                      </span>
+                    )}
+                    {event.address && <span>{event.address}</span>}
+                    {event.time && <span>{formatTime(event.time)}</span>}
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {t.guests.map((g) => {
                       const status = guestStatus(g.id)
