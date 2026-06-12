@@ -109,6 +109,9 @@ export type Guest = {
   cancelled: boolean
   cancelled_at: string | null
   details_sent_at: string | null
+  confirmed: boolean
+  confirmed_at: string | null
+  table_label: string | null
 }
 
 export type EventInfo = {

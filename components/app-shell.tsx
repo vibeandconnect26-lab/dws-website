@@ -11,7 +11,15 @@ import { Lock } from "lucide-react"
 
 type View = "form" | "admin"
 
-export function AppShell({ guests, eventInfo }: { guests: Guest[]; eventInfo: EventInfo }) {
+export function AppShell({
+  guests,
+  confirmedGuests,
+  eventInfo,
+}: {
+  guests: Guest[]
+  confirmedGuests: Guest[]
+  eventInfo: EventInfo
+}) {
   const [view, setView] = useState<View>("form")
   const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [showPinModal, setShowPinModal] = useState(false)
@@ -81,7 +89,7 @@ export function AppShell({ guests, eventInfo }: { guests: Guest[]; eventInfo: Ev
       {view === "form" ? (
         <Questionnaire eventInfo={eventInfo} />
       ) : (
-        <AdminDashboard guests={guests} eventInfo={eventInfo} />
+        <AdminDashboard guests={guests} confirmedGuests={confirmedGuests} eventInfo={eventInfo} />
       )}
 
       {showPinModal && (

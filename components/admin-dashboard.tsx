@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { type EventInfo, type Guest, type TableGroup, emptyEventInfo } from "@/lib/questions"
-import { deleteGuest, saveEventInfo, sendDinnerDetailsToAll } from "@/app/actions/event"
-import { Loader2, Mail, MailCheck, Pencil, Trash2 } from "lucide-react"
+import { deleteGuest, saveEventInfo, sendDinnerDetailsToTable } from "@/app/actions/event"
+import { CheckCircle2, Loader2, Mail, MailCheck, Pencil, Send, Trash2 } from "lucide-react"
 
 function formatDate(date: string, withYear = false) {
   if (!date) return "—"
@@ -31,9 +31,11 @@ type ParsedTable = TableGroup & { guestObjects: Guest[] }
 
 export function AdminDashboard({
   guests: initialGuests,
+  confirmedGuests,
   eventInfo: initialEvent,
 }: {
   guests: Guest[]
+  confirmedGuests: Guest[]
   eventInfo: EventInfo
 }) {
   const [guests, setGuests] = useState(initialGuests)
@@ -45,12 +47,16 @@ export function AdminDashboard({
   const [parsedTables, setParsedTables] = useState<ParsedTable[] | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const [source, setSource] = useState<"ai" | "heuristic" | null>(null)
+  const [unseatedCount, setUnseatedCount] = useState(0)
 
-  const [sending, setSending] = useState(false)
-  const [sendResult, setSendResult] = useState<{ sent: number; failed: number; errors: string[] } | null>(null)
+  // Per-table send state, keyed by table label.
+  const [sendingTable, setSendingTable] = useState<string | null>(null)
+  const [tableResults, setTableResults] = useState<
+    Record<string, { sent: number; failed: number; errors: string[] }>
+  >({})
 
-  const tablesNeeded = Math.ceil(guests.length / 7)
-  const introverts = guests.filter((g) => g.energy?.startsWith("Introvert")).length
+  const tableSize = Math.max(0, Number.parseInt(eventInfo.maxGuests || "0", 10) || 0)
+  const tablesPossible = tableSize > 0 ? Math.floor(guests.length / tableSize) : 0
 
   const handleDelete = async (id: number) => {
     setGuests((prev) => prev.filter((g) => g.id !== id))
@@ -63,38 +69,54 @@ export function AdminDashboard({
     await saveEventInfo(draftEvent)
   }
 
-  const handleSendDetails = async () => {
-    setSending(true)
-    setSendResult(null)
-    const result = await sendDinnerDetailsToAll()
-    setSendResult(result)
-    setSending(false)
+  const handleSendTable = async (table: ParsedTable) => {
+    setSendingTable(table.table)
+    const ids = table.guestObjects.map((g) => g.id)
+    const result = await sendDinnerDetailsToTable(ids, table.table)
+    setTableResults((prev) => ({ ...prev, [table.table]: result }))
+    setSendingTable(null)
+    // Mark these guests as having details sent in the local list.
+    if (result.sent > 0) {
+      setGuests((prev) =>
+        prev.map((g) => (ids.includes(g.id) ? { ...g, details_sent_at: new Date().toISOString() } : g)),
+      )
+    }
   }
 
   const generateGroupings = async () => {
     if (guests.length < 2) return
+    if (tableSize <= 0) {
+      setAiError("Set a 'Max Guests' value in Event Details first — that number is your table size.")
+      return
+    }
     setLoading(true)
     setParsedTables(null)
     setAiError(null)
     setSource(null)
+    setUnseatedCount(0)
     try {
       const res = await fetch("/api/groupings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guests }),
+        body: JSON.stringify({ guests, tableSize }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       const tables: TableGroup[] = data.tables
       setSource(data.source === "ai" ? "ai" : "heuristic")
-      setParsedTables(
-        tables.map((t) => ({
-          ...t,
-          guestObjects: t.guests.map((idx) => guests[idx - 1]).filter(Boolean),
-        })),
+      const parsed = tables.map((t) => ({
+        ...t,
+        guestObjects: t.guests.map((idx) => guests[idx - 1]).filter(Boolean),
+      }))
+      setParsedTables(parsed)
+      const seated = parsed.reduce((sum, t) => sum + t.guestObjects.length, 0)
+      setUnseatedCount(Math.max(0, guests.length - seated))
+    } catch (e) {
+      setAiError(
+        e instanceof Error && e.message
+          ? e.message
+          : "Could not generate groupings. Please try again.",
       )
-    } catch {
-      setAiError("Could not generate groupings. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -178,9 +200,9 @@ export function AdminDashboard({
 
       {/* Stats */}
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat num={guests.length} label="Registered Guests" />
-        <Stat num={tablesNeeded || "—"} label="Tables Needed" />
-        <Stat num={introverts} label="Introverts" />
+        <Stat num={guests.length} label="Pending Guests" />
+        <Stat num={tableSize > 0 ? tablesPossible : "—"} label={`Full Tables of ${tableSize || "?"}`} />
+        <Stat num={confirmedGuests.length} label="Confirmed" />
       </div>
 
       {guests.length === 0 ? (
@@ -189,51 +211,11 @@ export function AdminDashboard({
         </div>
       ) : (
         <>
-          {/* Send dinner details */}
-          <div className="mb-7 rounded-2xl border border-border bg-card p-7">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="font-serif text-xl text-foreground">Email Dinner Details</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Send every confirmed guest the venue, date, time, and a personal link to cancel their spot.
-                </p>
-              </div>
-              <button
-                onClick={handleSendDetails}
-                disabled={sending || !hasEvent}
-                className="inline-flex flex-shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {sending ? (
-                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Mail className="size-4" aria-hidden="true" />
-                )}
-                {sending ? "Sending..." : `Send to ${guests.length} guest${guests.length === 1 ? "" : "s"}`}
-              </button>
-            </div>
-            {!hasEvent && (
-              <p className="mt-3 text-[13px] text-destructive">
-                Add event details above before sending the email.
-              </p>
-            )}
-            {sendResult && (
-              <div className="mt-4 rounded-xl border border-border bg-secondary px-5 py-4 text-sm">
-                <p className="font-medium text-foreground">
-                  {sendResult.sent} sent
-                  {sendResult.failed > 0 ? ` · ${sendResult.failed} failed` : ""}
-                </p>
-                {sendResult.errors.length > 0 && (
-                  <ul className="mt-2 list-disc pl-5 text-[13px] text-destructive">
-                    {sendResult.errors.map((e) => (
-                      <li key={e}>{e}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
-
-          <h3 className="mb-5 font-serif text-xl text-foreground">Guest List</h3>
+          <h3 className="mb-1.5 font-serif text-xl text-foreground">Pending Guests</h3>
+          <p className="mb-5 text-sm text-muted-foreground">
+            These guests haven&apos;t been seated yet. Generate table groupings below, then email each table their
+            details. Once a guest confirms or cancels from that email, they drop off this list automatically.
+          </p>
           <div className="flex flex-col gap-3">
             {guests.map((g) => (
               <div
@@ -289,7 +271,9 @@ export function AdminDashboard({
               </button>
             </div>
             <p className="text-sm text-muted-foreground">
-              Claude analyzes all guests and suggests balanced tables based on interests, energy, and neighborhood.
+              Claude builds tables of exactly {tableSize > 0 ? tableSize : "your Max Guests"} guest
+              {tableSize === 1 ? "" : "s"}, balanced by interests, energy, and neighborhood. Then email each table
+              their dinner details.
             </p>
 
             {loading && (
@@ -308,32 +292,132 @@ export function AdminDashboard({
               </p>
             )}
 
-            {parsedTables?.map((table, i) => (
-              <div key={i} className="mb-4 mt-4 rounded-xl border border-border bg-secondary px-6 py-5">
-                <div className="font-serif text-lg text-[var(--gold-dark)]">{table.table}</div>
-                <div className="mb-3 text-[13px] italic text-[var(--gold-dark)]">{table.theme}</div>
-                {table.guestObjects.map((g) => (
-                  <div key={g.id} className="flex items-center gap-2.5 border-b border-border py-2.5 last:border-b-0">
-                    <div className="flex size-9 flex-shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                      {g.name?.[0]?.toUpperCase()}
-                    </div>
+            {parsedTables && unseatedCount > 0 && (
+              <p className="mt-2 rounded-lg border border-border bg-secondary px-4 py-2.5 text-[13px] text-muted-foreground">
+                {unseatedCount} guest{unseatedCount === 1 ? "" : "s"} couldn&apos;t fill a complete table of{" "}
+                {tableSize} and {unseatedCount === 1 ? "was" : "were"} left unseated. They&apos;ll be included the
+                next time you generate, once you have enough for another full table.
+              </p>
+            )}
+
+            {parsedTables?.map((table, i) => {
+              const result = tableResults[table.table]
+              const allSent = table.guestObjects.length > 0 && table.guestObjects.every((g) => g.details_sent_at)
+              return (
+                <div key={i} className="mb-4 mt-4 rounded-xl border border-border bg-secondary px-6 py-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-foreground">{g.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {[g.age_range, g.neighborhood].filter(Boolean).join(" · ")}
+                      <div className="font-serif text-lg text-[var(--gold-dark)]">
+                        {table.table}
+                        <span className="ml-2 text-[13px] font-sans not-italic text-muted-foreground">
+                          {table.guestObjects.length} guest{table.guestObjects.length === 1 ? "" : "s"}
+                        </span>
                       </div>
+                      <div className="text-[13px] italic text-[var(--gold-dark)]">{table.theme}</div>
                     </div>
-                    <div className="ml-auto flex flex-wrap justify-end gap-1.5">
-                      {(g.talk_about || []).slice(0, 2).map((t) => (
-                        <Tag key={t}>{t}</Tag>
-                      ))}
+                    <button
+                      onClick={() => handleSendTable(table)}
+                      disabled={sendingTable !== null || !hasEvent}
+                      className="inline-flex flex-shrink-0 items-center gap-2 rounded-xl bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {sendingTable === table.table ? (
+                        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      ) : allSent ? (
+                        <CheckCircle2 className="size-4" aria-hidden="true" />
+                      ) : (
+                        <Send className="size-4" aria-hidden="true" />
+                      )}
+                      {sendingTable === table.table
+                        ? "Sending..."
+                        : allSent
+                          ? "Resend details"
+                          : "Send details to this table"}
+                    </button>
+                  </div>
+
+                  {!hasEvent && (
+                    <p className="mt-2 text-[13px] text-destructive">Add event details above before sending.</p>
+                  )}
+                  {result && (
+                    <p className="mt-2 text-[13px] font-medium text-foreground">
+                      {result.sent} sent{result.failed > 0 ? ` · ${result.failed} failed` : ""}
+                      {result.errors.length > 0 ? ` — ${result.errors.join("; ")}` : ""}
+                    </p>
+                  )}
+
+                  <div className="mt-3">
+                    {table.guestObjects.map((g) => (
+                      <div
+                        key={g.id}
+                        className="flex items-center gap-2.5 border-b border-border py-2.5 last:border-b-0"
+                      >
+                        <div className="flex size-9 flex-shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+                          {g.name?.[0]?.toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                            {g.name}
+                            {g.details_sent_at && (
+                              <MailCheck className="size-3.5 text-[var(--gold-dark)]" aria-hidden="true" />
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {[g.age_range, g.neighborhood].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                        <div className="ml-auto flex flex-wrap justify-end gap-1.5">
+                          {(g.talk_about || []).slice(0, 2).map((t) => (
+                            <Tag key={t}>{t}</Tag>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 text-[13px] italic text-muted-foreground">{table.why}</div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Confirmed guests */}
+          {confirmedGuests.length > 0 && (
+            <div className="mt-8">
+              <h3 className="mb-1.5 font-serif text-xl text-foreground">Confirmed for Dinner</h3>
+              <p className="mb-5 text-sm text-muted-foreground">
+                {confirmedGuests.length} guest{confirmedGuests.length === 1 ? " has" : "s have"} confirmed their
+                seat from the email.
+              </p>
+              <div className="flex flex-col gap-3">
+                {confirmedGuests.map((g) => (
+                  <div
+                    key={g.id}
+                    className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-6 py-4"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-base font-semibold text-foreground">{g.name}</span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-[var(--gold-dark)]">
+                          <CheckCircle2 className="size-3" aria-hidden="true" />
+                          Confirmed
+                        </span>
+                        {g.table_label && (
+                          <span className="rounded-full bg-[var(--gold)]/12 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--gold-dark)]">
+                            {g.table_label}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                        <Mail className="size-3.5" aria-hidden="true" />
+                        <a href={`mailto:${g.email}`} className="hover:text-foreground hover:underline">
+                          {g.email}
+                        </a>
+                      </div>
                     </div>
                   </div>
                 ))}
-                <div className="mt-3 text-[13px] italic text-muted-foreground">{table.why}</div>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </>
       )}
     </div>

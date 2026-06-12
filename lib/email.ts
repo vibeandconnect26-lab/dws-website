@@ -47,6 +47,7 @@ function formatTime(time: string) {
 
 function buildHtml(guest: Guest, event: EventInfo) {
   const cancelUrl = `${getBaseUrl()}/cancel/${guest.cancel_token}`
+  const confirmUrl = `${getBaseUrl()}/confirm/${guest.cancel_token}`
   const dateStr = formatDate(event.date)
   const timeStr = formatTime(event.time)
   const mapsUrl = event.address
@@ -82,9 +83,11 @@ function buildHtml(guest: Guest, event: EventInfo) {
       </table>
     </div>
 
-    <div style="background: #fff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 20px; text-align: center; font-family: Helvetica, Arial, sans-serif;">
-      <p style="font-size: 14px; color: #6b6253; margin: 0 0 12px;">Can't make it anymore? Please let us know so we can offer your seat to someone else.</p>
-      <a href="${cancelUrl}" style="display: inline-block; padding: 10px 24px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 14px; font-weight: 600;">Cancel my spot</a>
+    <div style="background: #fff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; text-align: center; font-family: Helvetica, Arial, sans-serif;">
+      <p style="font-size: 15px; color: #2c2418; margin: 0 0 16px; font-weight: 600;">Please let us know if you can make it.</p>
+      <p style="font-size: 13px; color: #6b6253; margin: 0 0 16px;">Confirming locks in your seat. If you can't make it, cancel so we can offer your spot to someone else.</p>
+      <a href="${confirmUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; margin: 0 6px 10px;">Confirm my spot</a>
+      <a href="${cancelUrl}" style="display: inline-block; padding: 12px 28px; background: #faf7f2; color: #2c2418; text-decoration: none; border: 1px solid #d8cfbf; border-radius: 8px; font-size: 15px; font-weight: 600; margin: 0 6px 10px;">Cancel my spot</a>
     </div>
 
     <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>

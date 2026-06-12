@@ -41,10 +41,24 @@ export async function getGuests(): Promise<Guest[]> {
   const rows = await sql`
     SELECT id, name, email, age_range, neighborhood, motivation,
            talk_about, skip_topics, energy, surprise, hope, submitted_at,
-           cancel_token, cancelled, cancelled_at, details_sent_at
+           cancel_token, cancelled, cancelled_at, details_sent_at,
+           confirmed, confirmed_at, table_label
     FROM guests
-    WHERE cancelled = false
+    WHERE cancelled = false AND confirmed = false
     ORDER BY submitted_at ASC
+  `
+  return rows as Guest[]
+}
+
+export async function getConfirmedGuests(): Promise<Guest[]> {
+  const rows = await sql`
+    SELECT id, name, email, age_range, neighborhood, motivation,
+           talk_about, skip_topics, energy, surprise, hope, submitted_at,
+           cancel_token, cancelled, cancelled_at, details_sent_at,
+           confirmed, confirmed_at, table_label
+    FROM guests
+    WHERE cancelled = false AND confirmed = true
+    ORDER BY confirmed_at ASC
   `
   return rows as Guest[]
 }
@@ -95,7 +109,10 @@ export async function verifyAdmin(password: string) {
   return { ok: password === expected }
 }
 
-export async function sendDinnerDetailsToAll(): Promise<{
+export async function sendDinnerDetailsToTable(
+  guestIds: number[],
+  tableLabel: string,
+): Promise<{
   sent: number
   failed: number
   errors: string[]
@@ -104,13 +121,17 @@ export async function sendDinnerDetailsToAll(): Promise<{
   if (!event.restaurant) {
     return { sent: 0, failed: 0, errors: ["Add event details before sending."] }
   }
+  if (!guestIds || guestIds.length === 0) {
+    return { sent: 0, failed: 0, errors: ["No guests at this table."] }
+  }
 
   const rows = (await sql`
     SELECT id, name, email, age_range, neighborhood, motivation,
            talk_about, skip_topics, energy, surprise, hope, submitted_at,
-           cancel_token, cancelled, cancelled_at, details_sent_at
+           cancel_token, cancelled, cancelled_at, details_sent_at,
+           confirmed, confirmed_at, table_label
     FROM guests
-    WHERE cancelled = false
+    WHERE id = ANY(${guestIds}) AND cancelled = false
     ORDER BY submitted_at ASC
   `) as Guest[]
 
@@ -122,7 +143,10 @@ export async function sendDinnerDetailsToAll(): Promise<{
     const result = await sendDinnerDetails(guest, event)
     if (result.ok) {
       sent++
-      await sql`UPDATE guests SET details_sent_at = now() WHERE id = ${guest.id}`
+      await sql`
+        UPDATE guests SET details_sent_at = now(), table_label = ${tableLabel}
+        WHERE id = ${guest.id}
+      `
     } else {
       failed++
       if (result.error && !errors.includes(result.error)) errors.push(result.error)
@@ -137,11 +161,30 @@ export async function getGuestByToken(token: string): Promise<Guest | null> {
   const rows = (await sql`
     SELECT id, name, email, age_range, neighborhood, motivation,
            talk_about, skip_topics, energy, surprise, hope, submitted_at,
-           cancel_token, cancelled, cancelled_at, details_sent_at
+           cancel_token, cancelled, cancelled_at, details_sent_at,
+           confirmed, confirmed_at, table_label
     FROM guests
     WHERE cancel_token = ${token}
   `) as Guest[]
   return rows[0] ?? null
+}
+
+export async function confirmByToken(
+  token: string,
+): Promise<{ ok: boolean; alreadyConfirmed: boolean; cancelled: boolean }> {
+  const rows = (await sql`
+    SELECT confirmed, cancelled FROM guests WHERE cancel_token = ${token}
+  `) as { confirmed: boolean; cancelled: boolean }[]
+
+  if (rows.length === 0) return { ok: false, alreadyConfirmed: false, cancelled: false }
+  if (rows[0].cancelled) return { ok: false, alreadyConfirmed: false, cancelled: true }
+  if (rows[0].confirmed) return { ok: true, alreadyConfirmed: true, cancelled: false }
+
+  await sql`
+    UPDATE guests SET confirmed = true, confirmed_at = now() WHERE cancel_token = ${token}
+  `
+  revalidatePath("/")
+  return { ok: true, alreadyConfirmed: false, cancelled: false }
 }
 
 export async function cancelByToken(token: string): Promise<{ ok: boolean; alreadyCancelled: boolean }> {
