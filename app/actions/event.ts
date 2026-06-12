@@ -169,19 +169,42 @@ export async function getConfirmedGuests(eventId: number): Promise<Guest[]> {
   return rows as Guest[]
 }
 
+// Guests who cancelled after RSVPing, newest cancellation first.
+export async function getCancelledGuests(eventId: number): Promise<Guest[]> {
+  const rows = await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)}
+    FROM guests
+    WHERE event_id = ${eventId} AND cancelled = true
+    ORDER BY cancelled_at DESC NULLS LAST
+  `
+  return rows as Guest[]
+}
+
 // Per-event counts so the admin event list can show activity at a glance.
-export async function getEventCounts(): Promise<Record<number, { pending: number; confirmed: number }>> {
+export async function getEventCounts(): Promise<
+  Record<number, { pending: number; confirmed: number; cancelled: number }>
+> {
   const rows = (await sql`
     SELECT event_id,
       COUNT(*) FILTER (WHERE cancelled = false AND confirmed = false) AS pending,
-      COUNT(*) FILTER (WHERE cancelled = false AND confirmed = true) AS confirmed
+      COUNT(*) FILTER (WHERE cancelled = false AND confirmed = true) AS confirmed,
+      COUNT(*) FILTER (WHERE cancelled = true) AS cancelled
     FROM guests
     WHERE event_id IS NOT NULL
     GROUP BY event_id
-  `) as { event_id: number | string; pending: number | string; confirmed: number | string }[]
-  const out: Record<number, { pending: number; confirmed: number }> = {}
+  `) as {
+    event_id: number | string
+    pending: number | string
+    confirmed: number | string
+    cancelled: number | string
+  }[]
+  const out: Record<number, { pending: number; confirmed: number; cancelled: number }> = {}
   for (const r of rows) {
-    out[Number(r.event_id)] = { pending: Number(r.pending), confirmed: Number(r.confirmed) }
+    out[Number(r.event_id)] = {
+      pending: Number(r.pending),
+      confirmed: Number(r.confirmed),
+      cancelled: Number(r.cancelled),
+    }
   }
   return out
 }

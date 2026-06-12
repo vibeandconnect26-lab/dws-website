@@ -12,7 +12,12 @@ import { Lock } from "lucide-react"
 
 type View = "form" | "admin"
 
-export type GuestsByEvent = Record<number, { guests: Guest[]; confirmedGuests: Guest[] }>
+export type GuestsByEvent = Record<
+  number,
+  { guests: Guest[]; confirmedGuests: Guest[]; cancelledGuests: Guest[] }
+>
+
+type Counts = Record<number, { pending: number; confirmed: number; cancelled: number }>
 
 export function AppShell({
   events,
@@ -22,7 +27,7 @@ export function AppShell({
 }: {
   events: EventInfo[]
   openEvents: EventInfo[]
-  counts: Record<number, { pending: number; confirmed: number }>
+  counts: Counts
   guestsByEvent: GuestsByEvent
 }) {
   const [view, setView] = useState<View>("form")

@@ -31,6 +31,7 @@ import {
   Send,
   Trash2,
   Unlock,
+  XCircle,
 } from "lucide-react"
 
 function formatDate(date: string, withYear = false) {
@@ -52,7 +53,7 @@ function formatTime(time: string) {
   return parsed.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
 }
 
-type Counts = Record<number, { pending: number; confirmed: number }>
+type Counts = Record<number, { pending: number; confirmed: number; cancelled: number }>
 
 export function AdminDashboard({
   events: initialEvents,
@@ -105,6 +106,7 @@ export function AdminDashboard({
         event={selectedEvent}
         initialGuests={guestsByEvent[selectedEvent.id]?.guests ?? []}
         initialConfirmed={guestsByEvent[selectedEvent.id]?.confirmedGuests ?? []}
+        initialCancelled={guestsByEvent[selectedEvent.id]?.cancelledGuests ?? []}
         onBack={() => setSelectedId(null)}
         onEdited={(updated) => setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))}
       />
@@ -140,7 +142,7 @@ export function AdminDashboard({
       ) : (
         <div className="flex flex-col gap-4">
           {events.map((event) => {
-            const c = counts[event.id] ?? { pending: 0, confirmed: 0 }
+            const c = counts[event.id] ?? { pending: 0, confirmed: 0, cancelled: 0 }
             return (
               <div key={event.id} className="rounded-2xl border border-border bg-card px-6 py-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
@@ -175,6 +177,12 @@ export function AdminDashboard({
                     <div className="mt-2 text-[13px] text-foreground">
                       <span className="font-semibold">{c.pending}</span> pending ·{" "}
                       <span className="font-semibold">{c.confirmed}</span> confirmed
+                      {c.cancelled > 0 && (
+                        <>
+                          {" · "}
+                          <span className="font-semibold text-destructive">{c.cancelled}</span> cancelled
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -217,12 +225,14 @@ function EventDetail({
   event: initialEvent,
   initialGuests,
   initialConfirmed,
+  initialCancelled,
   onBack,
   onEdited,
 }: {
   event: EventInfo
   initialGuests: Guest[]
   initialConfirmed: Guest[]
+  initialCancelled: Guest[]
   onBack: () => void
   onEdited: (event: EventInfo) => void
 }) {
@@ -231,6 +241,7 @@ function EventDetail({
   const [savingEvent, setSavingEvent] = useState(false)
   const [guests, setGuests] = useState(initialGuests)
   const [confirmedGuests] = useState(initialConfirmed)
+  const [cancelledGuests] = useState(initialCancelled)
 
   const [loading, setLoading] = useState(false)
   const [parsedTables, setParsedTables] = useState<ParsedTable[] | null>(null)
@@ -251,6 +262,36 @@ function EventDetail({
   const [expandedGuests, setExpandedGuests] = useState<Record<number, boolean>>({})
   const toggleGuestExpanded = (id: number) =>
     setExpandedGuests((prev) => ({ ...prev, [id]: !prev[id] }))
+
+  // Manual fill-in: for a given open seat (keyed by the cancelled guest id),
+  // which pending guest the host picked, plus in-flight / result state.
+  const [fillSelection, setFillSelection] = useState<Record<number, number | "">>({})
+  const [fillingSeat, setFillingSeat] = useState<number | null>(null)
+  const [filledSeats, setFilledSeats] = useState<Record<number, string>>({})
+
+  const handleFillSeat = async (cancelledGuest: Guest) => {
+    const pendingId = fillSelection[cancelledGuest.id]
+    if (!pendingId) return
+    const replacement = guests.find((g) => g.id === pendingId)
+    if (!replacement) return
+    const tableLabel = cancelledGuest.table_label || "Table 1"
+    setFillingSeat(cancelledGuest.id)
+    const result = await sendDinnerDetailsToTable([replacement.id], tableLabel, event.id)
+    setFillingSeat(null)
+    if (result.sent > 0) {
+      // The replacement now holds the seat; drop them from the pending pool.
+      setGuests((prev) => prev.filter((g) => g.id !== replacement.id))
+      setFilledSeats((prev) => ({
+        ...prev,
+        [cancelledGuest.id]: `${replacement.name} was added to ${tableLabel} and emailed their details.`,
+      }))
+    } else {
+      setFilledSeats((prev) => ({
+        ...prev,
+        [cancelledGuest.id]: result.errors[0] || "Could not email the replacement. Try again.",
+      }))
+    }
+  }
 
   const [sendingReminders, setSendingReminders] = useState(false)
   const [reminderResult, setReminderResult] = useState<
@@ -792,6 +833,98 @@ function EventDetail({
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Cancelled guests + manual fill-in */}
+      {cancelledGuests.length > 0 && (
+        <div className="mt-8">
+          <h3 className="mb-1 font-serif text-xl text-foreground">Cancelled</h3>
+          <p className="mb-3 text-[13px] text-muted-foreground">
+            These guests dropped out. If they were already seated, the open seat is noted — fill it from your pending
+            pool and we&apos;ll email the replacement their details.
+          </p>
+          <div className="flex flex-col gap-3">
+            {cancelledGuests.map((g) => {
+              const filled = filledSeats[g.id]
+              const seatLabel = g.table_label
+              return (
+                <div key={g.id} className="rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-base font-semibold text-foreground">{g.name}</span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-destructive/12 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-destructive">
+                          <XCircle className="size-3" aria-hidden="true" />
+                          Cancelled
+                        </span>
+                        {seatLabel && (
+                          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--gold-dark)]">
+                            Open seat at {seatLabel}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-[13px] text-muted-foreground">
+                        {g.email}
+                        {g.cancelled_at && <span> · cancelled {formatDate(g.cancelled_at, true)}</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {filled ? (
+                    <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-foreground">
+                      {filled}
+                    </p>
+                  ) : guests.length === 0 ? (
+                    <p className="mt-3 text-[13px] text-muted-foreground">
+                      No pending guests available to fill this seat.
+                    </p>
+                  ) : (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <label className="sr-only" htmlFor={`fill-${g.id}`}>
+                        Choose a replacement guest
+                      </label>
+                      <select
+                        id={`fill-${g.id}`}
+                        value={fillSelection[g.id] ?? ""}
+                        onChange={(e) =>
+                          setFillSelection((prev) => ({
+                            ...prev,
+                            [g.id]: e.target.value ? Number(e.target.value) : "",
+                          }))
+                        }
+                        className="rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] outline-none transition-colors focus:border-[var(--gold)]"
+                      >
+                        <option value="">Pick a replacement…</option>
+                        {guests.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => handleFillSeat(g)}
+                        disabled={!fillSelection[g.id] || fillingSeat === g.id}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-1.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                      >
+                        {fillingSeat === g.id ? (
+                          <>
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                            Filling...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="size-3.5" aria-hidden="true" />
+                            Fill seat &amp; email
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
