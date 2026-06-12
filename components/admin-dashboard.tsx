@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { type EventInfo, type EventDraft, type Guest, type TableGroup } from "@/lib/questions"
+import { questions, type EventInfo, type EventDraft, type Guest, type TableGroup } from "@/lib/questions"
 import {
   createEvent,
   deleteEvent,
@@ -18,6 +18,7 @@ import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   GripVertical,
   Loader2,
   Lock,
@@ -245,6 +246,11 @@ function EventDetail({
   // Manual grouping: which guest is being dragged, and the table they came from.
   const [dragging, setDragging] = useState<{ guestId: number; fromTable: string } | null>(null)
   const [dragOverTable, setDragOverTable] = useState<string | null>(null)
+
+  // Which pending guest cards are expanded to show their full answers.
+  const [expandedGuests, setExpandedGuests] = useState<Record<number, boolean>>({})
+  const toggleGuestExpanded = (id: number) =>
+    setExpandedGuests((prev) => ({ ...prev, [id]: !prev[id] }))
 
   const [sendingReminders, setSendingReminders] = useState(false)
   const [reminderResult, setReminderResult] = useState<
@@ -497,6 +503,44 @@ function EventDetail({
                       <Tag key={t}>{t}</Tag>
                     ))}
                   </div>
+                  <button
+                    onClick={() => toggleGuestExpanded(g.id)}
+                    aria-expanded={Boolean(expandedGuests[g.id])}
+                    className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-[var(--gold-dark)] underline-offset-2 hover:underline"
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "size-3.5 transition-transform",
+                        expandedGuests[g.id] && "rotate-180",
+                      )}
+                      aria-hidden="true"
+                    />
+                    {expandedGuests[g.id] ? "Hide full answers" : "View full answers"}
+                  </button>
+                  {expandedGuests[g.id] && (
+                    <dl className="mt-3 grid gap-x-6 gap-y-3 border-t border-border pt-3 sm:grid-cols-2">
+                      {questions
+                        .filter((q) => q.id !== "name" && q.id !== "email")
+                        .map((q) => {
+                          const value = g[q.id as keyof Guest]
+                          const display = Array.isArray(value)
+                            ? value.join(", ")
+                            : value
+                              ? String(value)
+                              : null
+                          return (
+                            <div key={q.id}>
+                              <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                {q.label}
+                              </dt>
+                              <dd className="mt-0.5 text-[13px] text-foreground">
+                                {display || <span className="text-muted-foreground">—</span>}
+                              </dd>
+                            </div>
+                          )
+                        })}
+                    </dl>
+                  )}
                 </div>
                 <button
                   onClick={() => handleDelete(g.id)}
