@@ -216,6 +216,38 @@ export async function deleteGuest(id: number) {
   return { success: true }
 }
 
+// Moves a pending guest from their current dinner into another dinner's pool.
+// Resets all seating / send / RSVP state so they start fresh in the new pool.
+export async function moveGuestToEvent(
+  guestId: number,
+  targetEventId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const target = await getEvent(targetEventId)
+  if (!target) return { ok: false, error: "That dinner no longer exists." }
+
+  const rows = (await sql`SELECT id FROM guests WHERE id = ${guestId}`) as { id: number }[]
+  if (rows.length === 0) return { ok: false, error: "Guest not found." }
+
+  await sql`
+    UPDATE guests
+    SET event_id = ${targetEventId},
+        table_label = NULL,
+        details_sent_at = NULL,
+        reminder_sent_at = NULL,
+        confirmed = false,
+        confirmed_at = NULL,
+        cancelled = false,
+        cancelled_at = NULL,
+        feedback_sent_at = NULL,
+        feedback_rating = NULL,
+        feedback_comment = NULL,
+        feedback_submitted_at = NULL
+    WHERE id = ${guestId}
+  `
+  revalidatePath("/")
+  return { ok: true }
+}
+
 export async function verifyAdmin(password: string) {
   const expected = process.env.ADMIN_PASSWORD || "vibeadmin2025"
   return { ok: password === expected }

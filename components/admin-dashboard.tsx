@@ -6,6 +6,7 @@ import {
   createEvent,
   deleteEvent,
   deleteGuest,
+  moveGuestToEvent,
   removeGuestFromTable,
   sendDinnerDetailsToTable,
   sendFeedbackRequests,
@@ -19,6 +20,7 @@ import type { GuestsByEvent } from "@/components/app-shell"
 import { cn } from "@/lib/utils"
 import {
   ArrowLeft,
+  ArrowRightLeft,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
@@ -125,6 +127,7 @@ export function AdminDashboard({
     return (
       <EventDetail
         event={selectedEvent}
+        allEvents={events}
         initialGuests={guestsByEvent[selectedEvent.id]?.guests ?? []}
         initialConfirmed={guestsByEvent[selectedEvent.id]?.confirmedGuests ?? []}
         initialCancelled={guestsByEvent[selectedEvent.id]?.cancelledGuests ?? []}
@@ -289,6 +292,7 @@ type ParsedTable = TableGroup & { guestObjects: Guest[]; locked?: boolean }
 
 function EventDetail({
   event: initialEvent,
+  allEvents,
   initialGuests,
   initialConfirmed,
   initialCancelled,
@@ -296,6 +300,7 @@ function EventDetail({
   onEdited,
 }: {
   event: EventInfo
+  allEvents: EventInfo[]
   initialGuests: Guest[]
   initialConfirmed: Guest[]
   initialCancelled: Guest[]
@@ -472,6 +477,35 @@ function EventDetail({
   const handleDelete = async (id: number) => {
     setGuests((prev) => prev.filter((g) => g.id !== id))
     await deleteGuest(id)
+  }
+
+  // Move a pending guest to another dinner's pool. They leave this dinner's
+  // pending list and start fresh (unseated, unconfirmed) in the target dinner.
+  const otherEvents = useMemo(() => allEvents.filter((e) => e.id !== event.id), [allEvents, event.id])
+  const [moveSelection, setMoveSelection] = useState<Record<number, number | "">>({})
+  const [movingGuestId, setMovingGuestId] = useState<number | null>(null)
+  const [moveError, setMoveError] = useState<Record<number, string>>({})
+
+  const handleMoveGuest = async (guest: Guest) => {
+    const targetId = moveSelection[guest.id]
+    if (!targetId) return
+    setMovingGuestId(guest.id)
+    setMoveError((prev) => ({ ...prev, [guest.id]: "" }))
+    const result = await moveGuestToEvent(guest.id, Number(targetId))
+    setMovingGuestId(null)
+    if (result.ok) {
+      // Remove the guest from every local list for this dinner.
+      setGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setConfirmedGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setCancelledGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setMoveSelection((prev) => {
+        const next = { ...prev }
+        delete next[guest.id]
+        return next
+      })
+    } else {
+      setMoveError((prev) => ({ ...prev, [guest.id]: result.error || "Could not move guest." }))
+    }
   }
 
   const handleSendTable = async (table: ParsedTable) => {
@@ -765,13 +799,57 @@ function EventDetail({
                     </dl>
                   )}
                 </div>
-                <button
-                  onClick={() => handleDelete(g.id)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-                >
-                  <Trash2 className="size-3.5" aria-hidden="true" />
-                  Remove
-                </button>
+                <div className="flex shrink-0 flex-col items-stretch gap-2">
+                  <button
+                    onClick={() => handleDelete(g.id)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+                  >
+                    <Trash2 className="size-3.5" aria-hidden="true" />
+                    Remove
+                  </button>
+                  {otherEvents.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <label className="sr-only" htmlFor={`move-${g.id}`}>
+                          Move {g.name} to another dinner
+                        </label>
+                        <select
+                          id={`move-${g.id}`}
+                          value={moveSelection[g.id] ?? ""}
+                          onChange={(e) =>
+                            setMoveSelection((prev) => ({
+                              ...prev,
+                              [g.id]: e.target.value ? Number(e.target.value) : "",
+                            }))
+                          }
+                          className="min-w-0 flex-1 rounded-lg border-[1.5px] border-input bg-card px-2.5 py-1.5 text-[13px] outline-none transition-colors focus:border-[var(--gold)]"
+                        >
+                          <option value="">Move to dinner…</option>
+                          {otherEvents.map((e) => (
+                            <option key={e.id} value={e.id}>
+                              {e.restaurant || "Untitled Dinner"}
+                              {e.date ? ` · ${formatDate(e.date)}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => handleMoveGuest(g)}
+                          disabled={!moveSelection[g.id] || movingGuestId === g.id}
+                          title={`Move ${g.name} to the selected dinner`}
+                          aria-label={`Move ${g.name} to the selected dinner`}
+                          className="inline-flex items-center justify-center rounded-lg bg-primary px-2.5 py-1.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                        >
+                          {movingGuestId === g.id ? (
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <ArrowRightLeft className="size-3.5" aria-hidden="true" />
+                          )}
+                        </button>
+                      </div>
+                      {moveError[g.id] && <p className="text-[12px] text-destructive">{moveError[g.id]}</p>}
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
