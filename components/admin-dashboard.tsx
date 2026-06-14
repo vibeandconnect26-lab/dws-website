@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { questions, type EventInfo, type EventDraft, type Guest, type TableGroup } from "@/lib/questions"
 import {
   cancelDinnerForGuests,
+  confirmGuestManually,
   createEvent,
   deleteEvent,
   deleteGuest,
@@ -443,6 +444,24 @@ function EventDetail({
   // prompts consistent; confirmed/cancelled guests are skipped server-side.
   const [resendingTable, setResendingTable] = useState<string | null>(null)
   const [resendNotice, setResendNotice] = useState<Record<string, string>>({})
+
+  // Manually confirm a pending guest who can't confirm on their own end. Moves
+  // them from the pending pool into the confirmed list and emails a receipt.
+  const [confirmingGuestId, setConfirmingGuestId] = useState<number | null>(null)
+
+  const handleManualConfirm = async (guest: Guest) => {
+    setConfirmingGuestId(guest.id)
+    const result = await confirmGuestManually(guest.id, event.id)
+    setConfirmingGuestId(null)
+    if (!result.ok) return
+    const nowIso = new Date().toISOString()
+    setGuests((prev) => prev.filter((g) => g.id !== guest.id))
+    setConfirmedGuests((prev) =>
+      prev.some((g) => g.id === guest.id)
+        ? prev
+        : [...prev, { ...guest, confirmed: true, confirmed_at: nowIso, cancelled: false, cancelled_at: null }],
+    )
+  }
 
   const handleResendConfirmation = async (label: string, tableGuests: Guest[]) => {
     setResendingTable(label)
@@ -1299,6 +1318,21 @@ function EventDetail({
                               )}
                             />
                             {g.name}
+                            {status === "pending" && (
+                              <button
+                                onClick={() => handleManualConfirm(g)}
+                                disabled={confirmingGuestId === g.id}
+                                title={`Manually confirm ${g.name} for ${t.label}`}
+                                aria-label={`Manually confirm ${g.name}`}
+                                className="ml-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-[var(--success)]/15 hover:text-[var(--success)] disabled:opacity-50"
+                              >
+                                {confirmingGuestId === g.id ? (
+                                  <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <CheckCircle2 className="size-3" aria-hidden="true" />
+                                )}
+                              </button>
+                            )}
                             <button
                               onClick={() => handleRemoveFromTable(g)}
                               disabled={removingGuestId === g.id}

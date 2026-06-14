@@ -510,6 +510,37 @@ export async function confirmByToken(
   return { ok: true, alreadyConfirmed: false, cancelled: false }
 }
 
+// Manually confirms a guest from the admin dashboard, for cases where the guest
+// can't complete the confirmation on their end (broken link, email issues, etc.).
+// Mirrors confirmByToken but is keyed by guest id and emails a receipt.
+export async function confirmGuestManually(
+  guestId: number,
+  eventId: number,
+): Promise<{ ok: boolean; alreadyConfirmed: boolean; cancelled: boolean; error?: string }> {
+  const rows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)} FROM guests WHERE id = ${guestId}
+  `) as Guest[]
+
+  if (rows.length === 0) return { ok: false, alreadyConfirmed: false, cancelled: false, error: "Guest not found." }
+  if (rows[0].cancelled) return { ok: false, alreadyConfirmed: false, cancelled: true, error: "Guest has cancelled." }
+  if (rows[0].confirmed) return { ok: true, alreadyConfirmed: true, cancelled: false }
+
+  await sql`
+    UPDATE guests SET confirmed = true, confirmed_at = now() WHERE id = ${guestId}
+  `
+  revalidatePath("/")
+
+  // Send a short "you're confirmed" receipt so the guest has proof in their
+  // inbox. Email failures shouldn't block the confirmation itself.
+  const event = await getEvent(eventId)
+  if (event) {
+    const result = await sendConfirmationReceipt(rows[0], event)
+    if (!result.ok && result.error) console.log("[v0] manual confirmation receipt failed:", result.error)
+  }
+
+  return { ok: true, alreadyConfirmed: false, cancelled: false }
+}
+
 export async function sendReminders(opts?: { eventId?: number; onlyUnsent?: boolean }): Promise<{
   sent: number
   failed: number
