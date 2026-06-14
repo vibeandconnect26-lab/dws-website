@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { questions, type EventInfo, type EventDraft, type Guest, type TableGroup } from "@/lib/questions"
 import {
+  cancelDinnerForGuests,
   createEvent,
   deleteEvent,
   deleteGuest,
@@ -468,6 +469,55 @@ function EventDetail({
     setResendNotice((prev) => ({
       ...prev,
       [label]: parts.join(" · ") || "No pending guests to resend to.",
+    }))
+  }
+
+  // Cancel a whole table because not enough guests confirmed. Emails everyone at
+  // the table a cancellation notice and marks them cancelled so they move to the
+  // cancelled list. Confirmed guests at the table are included — they're told the
+  // dinner can't go ahead — while already-cancelled guests are skipped server-side.
+  const [cancellingTable, setCancellingTable] = useState<string | null>(null)
+  const [cancelNotice, setCancelNotice] = useState<Record<string, string>>({})
+
+  const handleCancelGroup = async (label: string, tableGuests: Guest[]) => {
+    const active = tableGuests.filter((g) => guestStatus(g.id) !== "cancelled")
+    if (active.length === 0) return
+    if (
+      !confirm(
+        `Cancel ${label} for ${active.length} guest${active.length === 1 ? "" : "s"}? Each will be emailed that the dinner won't go ahead and moved to the cancelled list.`,
+      )
+    )
+      return
+    setCancellingTable(label)
+    setCancelNotice((prev) => ({ ...prev, [label]: "" }))
+    const result = await cancelDinnerForGuests(
+      active.map((g) => g.id),
+      event.id,
+    )
+    setCancellingTable(null)
+    if (result.cancelled > 0) {
+      const ids = new Set(active.map((g) => g.id))
+      const nowIso = new Date().toISOString()
+      // Move every affected guest into the cancelled list across local state.
+      const movedSnapshot = [...guests, ...confirmedGuests].filter((g) => ids.has(g.id))
+      setGuests((prev) => prev.filter((g) => !ids.has(g.id)))
+      setConfirmedGuests((prev) => prev.filter((g) => !ids.has(g.id)))
+      setCancelledGuests((prev) => {
+        const existing = new Set(prev.map((g) => g.id))
+        const additions = movedSnapshot
+          .filter((g) => !existing.has(g.id))
+          .map((g) => ({ ...g, cancelled: true, cancelled_at: nowIso }))
+        return [...additions, ...prev]
+      })
+    }
+    const parts: string[] = []
+    if (result.sent > 0) parts.push(`${result.sent} notified`)
+    if (result.failed > 0) parts.push(`${result.failed} email${result.failed === 1 ? "" : "s"} failed`)
+    if (result.cancelled > 0) parts.push(`${result.cancelled} cancelled`)
+    if (result.errors.length > 0) parts.push(result.errors.join("; "))
+    setCancelNotice((prev) => ({
+      ...prev,
+      [label]: parts.join(" · ") || "Nothing to cancel.",
     }))
   }
 
@@ -1155,6 +1205,7 @@ function EventDetail({
             {sentTables.map((t) => {
               const confirmedCount = t.guests.filter((g) => guestStatus(g.id) === "confirmed").length
               const pendingCount = t.guests.filter((g) => guestStatus(g.id) === "pending").length
+              const activeCount = t.guests.filter((g) => guestStatus(g.id) !== "cancelled").length
               return (
                 <div key={t.label} className="rounded-xl border border-border bg-secondary/40 p-5">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1179,6 +1230,26 @@ function EventDetail({
                             <>
                               <MailCheck className="size-3.5" aria-hidden="true" />
                               Resend confirmation ({pendingCount})
+                            </>
+                          )}
+                        </button>
+                      )}
+                      {activeCount > 0 && (
+                        <button
+                          onClick={() => handleCancelGroup(t.label, t.guests)}
+                          disabled={cancellingTable === t.label}
+                          title={`Cancel ${t.label} and email all ${activeCount} guest${activeCount === 1 ? "" : "s"} that the dinner won't go ahead`}
+                          className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[12px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                        >
+                          {cancellingTable === t.label ? (
+                            <>
+                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                              Cancelling...
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="size-3.5" aria-hidden="true" />
+                              Cancel group
                             </>
                           )}
                         </button>
@@ -1252,6 +1323,9 @@ function EventDetail({
                   )}
                   {resendNotice[t.label] && (
                     <p className="mt-3 text-[12px] text-muted-foreground">{resendNotice[t.label]}</p>
+                  )}
+                  {cancelNotice[t.label] && (
+                    <p className="mt-3 text-[12px] text-muted-foreground">{cancelNotice[t.label]}</p>
                   )}
                 </div>
               )

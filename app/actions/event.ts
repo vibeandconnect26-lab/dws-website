@@ -2,7 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { type EventInfo, type EventDraft, emptyEventInfo, type Guest } from "@/lib/questions"
-import { sendDinnerDetails, sendFeedbackRequest, sendSystemErrorNotice } from "@/lib/email"
+import { sendDinnerCancelled, sendDinnerDetails, sendFeedbackRequest, sendSystemErrorNotice } from "@/lib/email"
 import { normalizePhone, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
@@ -365,6 +365,56 @@ export async function resendConfirmation(
 
   revalidatePath("/")
   return { sent, failed, skipped, errors }
+}
+
+// Cancels a dinner for a group of guests because not enough people confirmed.
+// Emails each non-cancelled guest a cancellation notice and marks them cancelled
+// so they move to the cancelled list. Pass the guest IDs that make up the group
+// (e.g. everyone at a sent table) along with the event.
+export async function cancelDinnerForGuests(
+  guestIds: number[],
+  eventId: number,
+): Promise<{ sent: number; failed: number; cancelled: number; errors: string[] }> {
+  const event = await getEvent(eventId)
+  if (!event) {
+    return { sent: 0, failed: 0, cancelled: 0, errors: ["That dinner no longer exists."] }
+  }
+  if (!guestIds || guestIds.length === 0) {
+    return { sent: 0, failed: 0, cancelled: 0, errors: ["No guests to cancel."] }
+  }
+
+  const rows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)}
+    FROM guests
+    WHERE id = ANY(${guestIds}) AND cancelled = false
+    ORDER BY submitted_at ASC
+  `) as Guest[]
+
+  let sent = 0
+  let failed = 0
+  let cancelled = 0
+  const errors: string[] = []
+
+  for (const guest of rows) {
+    const result = await sendDinnerCancelled(guest, event)
+    if (result.ok) {
+      sent++
+    } else {
+      failed++
+      if (result.error && !errors.includes(result.error)) errors.push(result.error)
+    }
+    // Mark cancelled regardless of email outcome so the admin's view stays
+    // accurate; the inline notice surfaces any email failures.
+    await sql`
+      UPDATE guests
+      SET cancelled = true, cancelled_at = now()
+      WHERE id = ${guest.id}
+    `
+    cancelled++
+  }
+
+  revalidatePath("/")
+  return { sent, failed, cancelled, errors }
 }
 
 // Removes a guest from a sent table and returns them to the pending pool.
