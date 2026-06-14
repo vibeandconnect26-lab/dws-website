@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import Image from "next/image"
 import { type EventInfo, type Guest } from "@/lib/questions"
-import { confirmByToken, resendReceiptByToken } from "@/app/actions/event"
+import { resendReceiptByToken } from "@/app/actions/event"
 import { CheckCircle2, Loader2, Mail, XCircle } from "lucide-react"
 
 function formatDate(date: string) {
@@ -25,40 +25,24 @@ function formatTime(time: string) {
   return parsed.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
 }
 
-type Status = "processing" | "confirmed" | "already-cancelled" | "error"
+type Status = "confirmed" | "already-cancelled" | "error"
 
 export function ConfirmView({
   guest,
   eventInfo,
   token,
+  status,
 }: {
   guest: Guest
   eventInfo: EventInfo
   token: string
+  status: Status
 }) {
-  // Clicking "Confirm my spot" in the email lands the guest straight here, and
-  // we process the confirmation automatically so they immediately see a
-  // "thank you for confirming" page — no extra button to press.
-  const initial: Status = guest.cancelled ? "already-cancelled" : guest.confirmed ? "confirmed" : "processing"
-  const [status, setStatus] = useState<Status>(initial)
+  // The confirmation is processed server-side before this page renders, so we
+  // simply display the resolved result. No client-side action call is needed,
+  // which keeps the flow reliable inside mobile email in-app browsers.
   const [resending, setResending] = useState(false)
   const [resendMsg, setResendMsg] = useState<string | null>(null)
-  const ran = useRef(false)
-
-  useEffect(() => {
-    // Only auto-confirm guests who haven't already confirmed or cancelled.
-    if (initial !== "processing" || ran.current) return
-    ran.current = true
-    confirmByToken(token).then((res) => {
-      if (res.cancelled) {
-        setStatus("already-cancelled")
-      } else if (res.ok) {
-        setStatus("confirmed")
-      } else {
-        setStatus("error")
-      }
-    })
-  }, [initial, token])
 
   // Lets the guest request another copy of their confirmation email straight
   // from this page, in case the automatic one never arrived.
@@ -92,17 +76,7 @@ export function ConfirmView({
       </header>
 
       <main className="mx-auto flex max-w-lg flex-col items-center px-6 py-16">
-        {status === "processing" ? (
-          <div className="w-full rounded-2xl border border-border bg-card px-8 py-10 text-center">
-            <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-secondary">
-              <Loader2 className="size-7 animate-spin text-[var(--gold-dark)]" aria-hidden="true" />
-            </div>
-            <h1 className="mb-2 font-serif text-2xl text-foreground">Confirming your spot…</h1>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              Hang tight, {firstName} — we&apos;re locking in your seat.
-            </p>
-          </div>
-        ) : status === "confirmed" ? (
+        {status === "confirmed" ? (
           <div className="w-full rounded-2xl border border-border bg-card px-8 py-10 text-center">
             <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-secondary">
               <CheckCircle2 className="size-7 text-[var(--gold-dark)]" aria-hidden="true" />
