@@ -3,8 +3,8 @@
 import { useState } from "react"
 import Image from "next/image"
 import { type EventInfo, type Guest } from "@/lib/questions"
-import { confirmByToken, cancelByToken } from "@/app/actions/event"
-import { CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { confirmByToken, cancelByToken, resendReceiptByToken } from "@/app/actions/event"
+import { CheckCircle2, Loader2, Mail, XCircle } from "lucide-react"
 
 function formatDate(date: string) {
   if (!date) return ""
@@ -44,6 +44,22 @@ export function ConfirmView({
   const [status, setStatus] = useState<Status>(initial)
   const [loading, setLoading] = useState<"confirm" | "cancel" | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [resending, setResending] = useState(false)
+  const [resendMsg, setResendMsg] = useState<string | null>(null)
+
+  // Lets the guest request another copy of their confirmation/cancellation
+  // email straight from this page, in case the automatic one never arrived.
+  const handleResend = async () => {
+    setResending(true)
+    setResendMsg(null)
+    const res = await resendReceiptByToken(token)
+    setResending(false)
+    if (res.ok) {
+      setResendMsg("Sent! Check your inbox in a minute (and your spam folder, just in case).")
+    } else {
+      setResendMsg(res.error || "We couldn't resend the email. Please contact the host.")
+    }
+  }
 
   const handleConfirm = async () => {
     setLoading("confirm")
@@ -100,6 +116,21 @@ export function ConfirmView({
               {when ? ` on ${when}` : ""}. We can&apos;t wait to see you there. Check your email for the full
               details.
             </p>
+            <div className="mt-6 border-t border-border pt-5">
+              <button
+                onClick={handleResend}
+                disabled={resending}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border-[1.5px] border-input bg-card px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+              >
+                {resending ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Mail className="size-4" aria-hidden="true" />
+                )}
+                {resending ? "Sending..." : "Resend confirmation email"}
+              </button>
+              {resendMsg && <p className="mt-3 text-[13px] text-muted-foreground">{resendMsg}</p>}
+            </div>
           </div>
         ) : status === "cancelled" ? (
           <div className="w-full rounded-2xl border border-border bg-card px-8 py-10 text-center">
@@ -111,6 +142,21 @@ export function ConfirmView({
               Thanks for letting us know, {firstName}. We&apos;ve cancelled your reservation and can now offer your
               seat to someone else. We hope to see you at a future dinner.
             </p>
+            <div className="mt-6 border-t border-border pt-5">
+              <button
+                onClick={handleResend}
+                disabled={resending}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border-[1.5px] border-input bg-card px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+              >
+                {resending ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Mail className="size-4" aria-hidden="true" />
+                )}
+                {resending ? "Sending..." : "Resend cancellation email"}
+              </button>
+              {resendMsg && <p className="mt-3 text-[13px] text-muted-foreground">{resendMsg}</p>}
+            </div>
           </div>
         ) : status === "already-cancelled" ? (
           <div className="w-full rounded-2xl border border-border bg-card px-8 py-10 text-center">
@@ -119,6 +165,21 @@ export function ConfirmView({
               It looks like this spot has already been cancelled. If this was a mistake, please contact the host to
               get back on the list.
             </p>
+            <div className="mt-6 border-t border-border pt-5">
+              <button
+                onClick={handleResend}
+                disabled={resending}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border-[1.5px] border-input bg-card px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+              >
+                {resending ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Mail className="size-4" aria-hidden="true" />
+                )}
+                {resending ? "Sending..." : "Resend cancellation email"}
+              </button>
+              {resendMsg && <p className="mt-3 text-[13px] text-muted-foreground">{resendMsg}</p>}
+            </div>
           </div>
         ) : (
           <div className="w-full rounded-2xl border border-border bg-card px-8 py-10 text-center">

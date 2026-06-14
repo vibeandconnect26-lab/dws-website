@@ -592,6 +592,34 @@ export async function cancelByToken(token: string): Promise<{ ok: boolean; alrea
   return { ok: true, alreadyCancelled: false }
 }
 
+// Re-sends the receipt for a guest's current status (confirmed or cancelled).
+// Lets a guest request another copy from the confirmation page if the first
+// email never arrived or was lost.
+export async function resendReceiptByToken(
+  token: string,
+): Promise<{ ok: boolean; type: "confirmed" | "cancelled" | "none"; error?: string }> {
+  const rows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)} FROM guests WHERE cancel_token = ${token}
+  `) as Guest[]
+  if (rows.length === 0) return { ok: false, type: "none", error: "We couldn't find your reservation." }
+
+  const guest = rows[0]
+  const event = guest.event_id ? await getEvent(guest.event_id) : null
+  if (!event) return { ok: false, type: "none", error: "This dinner is no longer available." }
+
+  if (guest.cancelled) {
+    const result = await sendCancellationReceipt(guest, event)
+    if (!result.ok && result.error) console.log("[v0] resend cancellation receipt failed:", result.error)
+    return result.ok ? { ok: true, type: "cancelled" } : { ok: false, type: "cancelled", error: result.error }
+  }
+  if (guest.confirmed) {
+    const result = await sendConfirmationReceipt(guest, event)
+    if (!result.ok && result.error) console.log("[v0] resend confirmation receipt failed:", result.error)
+    return result.ok ? { ok: true, type: "confirmed" } : { ok: false, type: "confirmed", error: result.error }
+  }
+  return { ok: false, type: "none", error: "Please confirm or cancel your spot first." }
+}
+
 // Sends the post-event review request to everyone who attended (confirmed,
 // not cancelled). When triggered by cron we skip anyone already emailed.
 export async function sendFeedbackRequests(opts?: { eventId?: number; onlyUnsent?: boolean }): Promise<{
