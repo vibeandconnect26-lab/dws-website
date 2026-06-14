@@ -3,10 +3,14 @@
 import { useMemo, useState } from "react"
 import { questions, type EventInfo, type EventDraft, type Guest, type TableGroup } from "@/lib/questions"
 import {
+  cancelDinnerForGuests,
   createEvent,
   deleteEvent,
   deleteGuest,
+  duplicateEvent,
+  moveGuestToEvent,
   removeGuestFromTable,
+  resendConfirmation,
   sendDinnerDetailsToTable,
   sendFeedbackRequests,
   sendReminders,
@@ -19,9 +23,11 @@ import type { GuestsByEvent } from "@/components/app-shell"
 import { cn } from "@/lib/utils"
 import {
   ArrowLeft,
+  ArrowRightLeft,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
+  Copy,
   GripVertical,
   Loader2,
   Lock,
@@ -111,6 +117,18 @@ export function AdminDashboard({
     setBusyEventId(null)
   }
 
+  // Copies a dinner's details into a fresh event and opens it for editing,
+  // so the admin can tweak the date/restaurant and publish without re-typing.
+  const handleDuplicateEvent = async (event: EventInfo) => {
+    setBusyEventId(event.id)
+    const copy = await duplicateEvent(event.id)
+    setBusyEventId(null)
+    if (copy) {
+      setEvents((prev) => [copy, ...prev])
+      setSelectedId(copy.id)
+    }
+  }
+
   const handleDeleteEvent = async (event: EventInfo) => {
     if (!confirm(`Delete "${event.restaurant || "this event"}" and all of its guests? This cannot be undone.`)) return
     setBusyEventId(event.id)
@@ -125,6 +143,7 @@ export function AdminDashboard({
     return (
       <EventDetail
         event={selectedEvent}
+        allEvents={events}
         initialGuests={guestsByEvent[selectedEvent.id]?.guests ?? []}
         initialConfirmed={guestsByEvent[selectedEvent.id]?.confirmedGuests ?? []}
         initialCancelled={guestsByEvent[selectedEvent.id]?.cancelledGuests ?? []}
@@ -266,6 +285,19 @@ export function AdminDashboard({
                     {event.isOpen ? "Close signups" : "Open signups"}
                   </button>
                   <button
+                    onClick={() => handleDuplicateEvent(event)}
+                    disabled={busyEventId === event.id}
+                    title="Create a new dinner pre-filled with these details"
+                    className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                  >
+                    {busyEventId === event.id ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Copy className="size-3.5" aria-hidden="true" />
+                    )}
+                    Duplicate
+                  </button>
+                  <button
                     onClick={() => handleDeleteEvent(event)}
                     disabled={busyEventId === event.id}
                     className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
@@ -289,6 +321,7 @@ type ParsedTable = TableGroup & { guestObjects: Guest[]; locked?: boolean }
 
 function EventDetail({
   event: initialEvent,
+  allEvents,
   initialGuests,
   initialConfirmed,
   initialCancelled,
@@ -296,6 +329,7 @@ function EventDetail({
   onEdited,
 }: {
   event: EventInfo
+  allEvents: EventInfo[]
   initialGuests: Guest[]
   initialConfirmed: Guest[]
   initialCancelled: Guest[]
@@ -404,6 +438,89 @@ function EventDetail({
   const [removingGuestId, setRemovingGuestId] = useState<number | null>(null)
   const [removeNotice, setRemoveNotice] = useState<Record<string, string>>({})
 
+  // Resend the confirmation email to a table's still-pending guests. We pass the
+  // full ordered list of the table's guests so the server keeps seat-specific
+  // prompts consistent; confirmed/cancelled guests are skipped server-side.
+  const [resendingTable, setResendingTable] = useState<string | null>(null)
+  const [resendNotice, setResendNotice] = useState<Record<string, string>>({})
+
+  const handleResendConfirmation = async (label: string, tableGuests: Guest[]) => {
+    setResendingTable(label)
+    setResendNotice((prev) => ({ ...prev, [label]: "" }))
+    const result = await resendConfirmation(
+      tableGuests.map((g) => g.id),
+      event.id,
+    )
+    setResendingTable(null)
+    if (result.sent > 0) {
+      setGuests((prev) =>
+        prev.map((g) =>
+          g.table_label === label && !g.confirmed && !g.cancelled
+            ? { ...g, details_sent_at: new Date().toISOString() }
+            : g,
+        ),
+      )
+    }
+    const parts: string[] = []
+    if (result.sent > 0) parts.push(`${result.sent} confirmation${result.sent === 1 ? "" : "s"} resent`)
+    if (result.skipped > 0) parts.push(`${result.skipped} skipped`)
+    if (result.failed > 0) parts.push(`${result.failed} failed`)
+    if (result.errors.length > 0) parts.push(result.errors.join("; "))
+    setResendNotice((prev) => ({
+      ...prev,
+      [label]: parts.join(" · ") || "No pending guests to resend to.",
+    }))
+  }
+
+  // Cancel a whole table because not enough guests confirmed. Emails everyone at
+  // the table a cancellation notice and marks them cancelled so they move to the
+  // cancelled list. Confirmed guests at the table are included — they're told the
+  // dinner can't go ahead — while already-cancelled guests are skipped server-side.
+  const [cancellingTable, setCancellingTable] = useState<string | null>(null)
+  const [cancelNotice, setCancelNotice] = useState<Record<string, string>>({})
+
+  const handleCancelGroup = async (label: string, tableGuests: Guest[]) => {
+    const active = tableGuests.filter((g) => guestStatus(g.id) !== "cancelled")
+    if (active.length === 0) return
+    if (
+      !confirm(
+        `Cancel ${label} for ${active.length} guest${active.length === 1 ? "" : "s"}? Each will be emailed that the dinner won't go ahead and moved to the cancelled list.`,
+      )
+    )
+      return
+    setCancellingTable(label)
+    setCancelNotice((prev) => ({ ...prev, [label]: "" }))
+    const result = await cancelDinnerForGuests(
+      active.map((g) => g.id),
+      event.id,
+    )
+    setCancellingTable(null)
+    if (result.cancelled > 0) {
+      const ids = new Set(active.map((g) => g.id))
+      const nowIso = new Date().toISOString()
+      // Move every affected guest into the cancelled list across local state.
+      const movedSnapshot = [...guests, ...confirmedGuests].filter((g) => ids.has(g.id))
+      setGuests((prev) => prev.filter((g) => !ids.has(g.id)))
+      setConfirmedGuests((prev) => prev.filter((g) => !ids.has(g.id)))
+      setCancelledGuests((prev) => {
+        const existing = new Set(prev.map((g) => g.id))
+        const additions = movedSnapshot
+          .filter((g) => !existing.has(g.id))
+          .map((g) => ({ ...g, cancelled: true, cancelled_at: nowIso }))
+        return [...additions, ...prev]
+      })
+    }
+    const parts: string[] = []
+    if (result.sent > 0) parts.push(`${result.sent} notified`)
+    if (result.failed > 0) parts.push(`${result.failed} email${result.failed === 1 ? "" : "s"} failed`)
+    if (result.cancelled > 0) parts.push(`${result.cancelled} cancelled`)
+    if (result.errors.length > 0) parts.push(result.errors.join("; "))
+    setCancelNotice((prev) => ({
+      ...prev,
+      [label]: parts.join(" · ") || "Nothing to cancel.",
+    }))
+  }
+
   // Pull a guest off a sent table, return them to the pending pool, and email
   // them a "system error / please disregard" notice. Reflects the change in all
   // local lists so the UI updates without a reload.
@@ -472,6 +589,35 @@ function EventDetail({
   const handleDelete = async (id: number) => {
     setGuests((prev) => prev.filter((g) => g.id !== id))
     await deleteGuest(id)
+  }
+
+  // Move a pending guest to another dinner's pool. They leave this dinner's
+  // pending list and start fresh (unseated, unconfirmed) in the target dinner.
+  const otherEvents = useMemo(() => allEvents.filter((e) => e.id !== event.id), [allEvents, event.id])
+  const [moveSelection, setMoveSelection] = useState<Record<number, number | "">>({})
+  const [movingGuestId, setMovingGuestId] = useState<number | null>(null)
+  const [moveError, setMoveError] = useState<Record<number, string>>({})
+
+  const handleMoveGuest = async (guest: Guest) => {
+    const targetId = moveSelection[guest.id]
+    if (!targetId) return
+    setMovingGuestId(guest.id)
+    setMoveError((prev) => ({ ...prev, [guest.id]: "" }))
+    const result = await moveGuestToEvent(guest.id, Number(targetId))
+    setMovingGuestId(null)
+    if (result.ok) {
+      // Remove the guest from every local list for this dinner.
+      setGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setConfirmedGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setCancelledGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setMoveSelection((prev) => {
+        const next = { ...prev }
+        delete next[guest.id]
+        return next
+      })
+    } else {
+      setMoveError((prev) => ({ ...prev, [guest.id]: result.error || "Could not move guest." }))
+    }
   }
 
   const handleSendTable = async (table: ParsedTable) => {
@@ -765,13 +911,57 @@ function EventDetail({
                     </dl>
                   )}
                 </div>
-                <button
-                  onClick={() => handleDelete(g.id)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-                >
-                  <Trash2 className="size-3.5" aria-hidden="true" />
-                  Remove
-                </button>
+                <div className="flex shrink-0 flex-col items-stretch gap-2">
+                  <button
+                    onClick={() => handleDelete(g.id)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+                  >
+                    <Trash2 className="size-3.5" aria-hidden="true" />
+                    Remove
+                  </button>
+                  {otherEvents.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <label className="sr-only" htmlFor={`move-${g.id}`}>
+                          Move {g.name} to another dinner
+                        </label>
+                        <select
+                          id={`move-${g.id}`}
+                          value={moveSelection[g.id] ?? ""}
+                          onChange={(e) =>
+                            setMoveSelection((prev) => ({
+                              ...prev,
+                              [g.id]: e.target.value ? Number(e.target.value) : "",
+                            }))
+                          }
+                          className="min-w-0 flex-1 rounded-lg border-[1.5px] border-input bg-card px-2.5 py-1.5 text-[13px] outline-none transition-colors focus:border-[var(--gold)]"
+                        >
+                          <option value="">Move to dinner…</option>
+                          {otherEvents.map((e) => (
+                            <option key={e.id} value={e.id}>
+                              {e.restaurant || "Untitled Dinner"}
+                              {e.date ? ` · ${formatDate(e.date)}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => handleMoveGuest(g)}
+                          disabled={!moveSelection[g.id] || movingGuestId === g.id}
+                          title={`Move ${g.name} to the selected dinner`}
+                          aria-label={`Move ${g.name} to the selected dinner`}
+                          className="inline-flex items-center justify-center rounded-lg bg-primary px-2.5 py-1.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                        >
+                          {movingGuestId === g.id ? (
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <ArrowRightLeft className="size-3.5" aria-hidden="true" />
+                          )}
+                        </button>
+                      </div>
+                      {moveError[g.id] && <p className="text-[12px] text-destructive">{moveError[g.id]}</p>}
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -1014,13 +1204,57 @@ function EventDetail({
           <div className="flex flex-col gap-4">
             {sentTables.map((t) => {
               const confirmedCount = t.guests.filter((g) => guestStatus(g.id) === "confirmed").length
+              const pendingCount = t.guests.filter((g) => guestStatus(g.id) === "pending").length
+              const activeCount = t.guests.filter((g) => guestStatus(g.id) !== "cancelled").length
               return (
                 <div key={t.label} className="rounded-xl border border-border bg-secondary/40 p-5">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <h4 className="font-serif text-lg text-foreground">{t.label}</h4>
-                    <span className="text-[12px] text-muted-foreground">
-                      {confirmedCount}/{t.guests.length} confirmed
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[12px] text-muted-foreground">
+                        {confirmedCount}/{t.guests.length} confirmed
+                      </span>
+                      {pendingCount > 0 && (
+                        <button
+                          onClick={() => handleResendConfirmation(t.label, t.guests)}
+                          disabled={resendingTable === t.label}
+                          title={`Resend the confirmation email to ${pendingCount} pending guest${pendingCount === 1 ? "" : "s"} at ${t.label}`}
+                          className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[12px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                        >
+                          {resendingTable === t.label ? (
+                            <>
+                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                              Resending...
+                            </>
+                          ) : (
+                            <>
+                              <MailCheck className="size-3.5" aria-hidden="true" />
+                              Resend confirmation ({pendingCount})
+                            </>
+                          )}
+                        </button>
+                      )}
+                      {activeCount > 0 && (
+                        <button
+                          onClick={() => handleCancelGroup(t.label, t.guests)}
+                          disabled={cancellingTable === t.label}
+                          title={`Cancel ${t.label} and email all ${activeCount} guest${activeCount === 1 ? "" : "s"} that the dinner won't go ahead`}
+                          className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[12px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                        >
+                          {cancellingTable === t.label ? (
+                            <>
+                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                              Cancelling...
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="size-3.5" aria-hidden="true" />
+                              Cancel group
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
                     {event.date && (
@@ -1086,6 +1320,12 @@ function EventDetail({
                   </div>
                   {removeNotice[t.label] && (
                     <p className="mt-3 text-[12px] text-muted-foreground">{removeNotice[t.label]}</p>
+                  )}
+                  {resendNotice[t.label] && (
+                    <p className="mt-3 text-[12px] text-muted-foreground">{resendNotice[t.label]}</p>
+                  )}
+                  {cancelNotice[t.label] && (
+                    <p className="mt-3 text-[12px] text-muted-foreground">{cancelNotice[t.label]}</p>
                   )}
                 </div>
               )

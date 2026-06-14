@@ -2,7 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { type EventInfo, type EventDraft, emptyEventInfo, type Guest } from "@/lib/questions"
-import { sendDinnerDetails, sendFeedbackRequest, sendSystemErrorNotice } from "@/lib/email"
+import { sendDinnerCancelled, sendDinnerDetails, sendFeedbackRequest, sendSystemErrorNotice } from "@/lib/email"
 import { normalizePhone, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
@@ -118,6 +118,26 @@ export async function createEvent(draft: EventDraft): Promise<EventInfo> {
   return mapEvent(rows[0])
 }
 
+// Creates a new dinner pre-filled with another dinner's details so the admin
+// can spin up similar events quickly. Guests are NOT copied, the date/time are
+// cleared (each event needs its own), and the copy starts closed for signups.
+export async function duplicateEvent(eventId: number): Promise<EventInfo | null> {
+  const source = await getEvent(eventId)
+  if (!source) return null
+
+  const rows = (await sql`
+    INSERT INTO events (restaurant, address, event_date, event_time, max_guests, dress_code, notes, is_open)
+    VALUES (
+      ${source.restaurant ? `${source.restaurant} (Copy)` : ""},
+      ${source.address}, ${""}, ${""},
+      ${source.maxGuests}, ${source.dressCode}, ${source.notes}, ${false}
+    )
+    RETURNING id, restaurant, address, event_date, event_time, max_guests, dress_code, notes, is_open
+  `) as EventRow[]
+  revalidatePath("/")
+  return mapEvent(rows[0])
+}
+
 export async function updateEvent(info: EventInfo): Promise<{ success: boolean }> {
   await sql`
     UPDATE events SET
@@ -216,6 +236,38 @@ export async function deleteGuest(id: number) {
   return { success: true }
 }
 
+// Moves a pending guest from their current dinner into another dinner's pool.
+// Resets all seating / send / RSVP state so they start fresh in the new pool.
+export async function moveGuestToEvent(
+  guestId: number,
+  targetEventId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const target = await getEvent(targetEventId)
+  if (!target) return { ok: false, error: "That dinner no longer exists." }
+
+  const rows = (await sql`SELECT id FROM guests WHERE id = ${guestId}`) as { id: number }[]
+  if (rows.length === 0) return { ok: false, error: "Guest not found." }
+
+  await sql`
+    UPDATE guests
+    SET event_id = ${targetEventId},
+        table_label = NULL,
+        details_sent_at = NULL,
+        reminder_sent_at = NULL,
+        confirmed = false,
+        confirmed_at = NULL,
+        cancelled = false,
+        cancelled_at = NULL,
+        feedback_sent_at = NULL,
+        feedback_rating = NULL,
+        feedback_comment = NULL,
+        feedback_submitted_at = NULL
+    WHERE id = ${guestId}
+  `
+  revalidatePath("/")
+  return { ok: true }
+}
+
 export async function verifyAdmin(password: string) {
   const expected = process.env.ADMIN_PASSWORD || "vibeadmin2025"
   return { ok: password === expected }
@@ -265,6 +317,104 @@ export async function sendDinnerDetailsToTable(
 
   revalidatePath("/")
   return { sent, failed, errors }
+}
+
+// Re-sends the dinner details / confirmation email to guests who were already
+// emailed but haven't confirmed (or cancelled) yet. Pass the full ordered list
+// of a table's guest IDs so seat-specific prompts stay consistent — confirmed
+// and cancelled guests are skipped automatically.
+export async function resendConfirmation(
+  guestIds: number[],
+  eventId: number,
+): Promise<{ sent: number; failed: number; skipped: number; errors: string[] }> {
+  const event = await getEvent(eventId)
+  if (!event || !event.restaurant) {
+    return { sent: 0, failed: 0, skipped: 0, errors: ["Add event details before sending."] }
+  }
+  if (!guestIds || guestIds.length === 0) {
+    return { sent: 0, failed: 0, skipped: 0, errors: ["No guests to resend to."] }
+  }
+
+  const rows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)}
+    FROM guests
+    WHERE id = ANY(${guestIds})
+    ORDER BY submitted_at ASC
+  `) as Guest[]
+
+  let sent = 0
+  let failed = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  for (const [seatIndex, guest] of rows.entries()) {
+    // Only resend to guests already emailed who haven't confirmed or cancelled.
+    if (!guest.details_sent_at || guest.confirmed || guest.cancelled) {
+      skipped++
+      continue
+    }
+    const result = await sendDinnerDetails(guest, event, seatIndex)
+    if (result.ok) {
+      sent++
+      await sql`UPDATE guests SET details_sent_at = now() WHERE id = ${guest.id}`
+    } else {
+      failed++
+      if (result.error && !errors.includes(result.error)) errors.push(result.error)
+    }
+  }
+
+  revalidatePath("/")
+  return { sent, failed, skipped, errors }
+}
+
+// Cancels a dinner for a group of guests because not enough people confirmed.
+// Emails each non-cancelled guest a cancellation notice and marks them cancelled
+// so they move to the cancelled list. Pass the guest IDs that make up the group
+// (e.g. everyone at a sent table) along with the event.
+export async function cancelDinnerForGuests(
+  guestIds: number[],
+  eventId: number,
+): Promise<{ sent: number; failed: number; cancelled: number; errors: string[] }> {
+  const event = await getEvent(eventId)
+  if (!event) {
+    return { sent: 0, failed: 0, cancelled: 0, errors: ["That dinner no longer exists."] }
+  }
+  if (!guestIds || guestIds.length === 0) {
+    return { sent: 0, failed: 0, cancelled: 0, errors: ["No guests to cancel."] }
+  }
+
+  const rows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)}
+    FROM guests
+    WHERE id = ANY(${guestIds}) AND cancelled = false
+    ORDER BY submitted_at ASC
+  `) as Guest[]
+
+  let sent = 0
+  let failed = 0
+  let cancelled = 0
+  const errors: string[] = []
+
+  for (const guest of rows) {
+    const result = await sendDinnerCancelled(guest, event)
+    if (result.ok) {
+      sent++
+    } else {
+      failed++
+      if (result.error && !errors.includes(result.error)) errors.push(result.error)
+    }
+    // Mark cancelled regardless of email outcome so the admin's view stays
+    // accurate; the inline notice surfaces any email failures.
+    await sql`
+      UPDATE guests
+      SET cancelled = true, cancelled_at = now()
+      WHERE id = ${guest.id}
+    `
+    cancelled++
+  }
+
+  revalidatePath("/")
+  return { sent, failed, cancelled, errors }
 }
 
 // Removes a guest from a sent table and returns them to the pending pool.

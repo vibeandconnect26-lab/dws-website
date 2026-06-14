@@ -239,6 +239,51 @@ export async function sendSystemErrorNotice(guest: Guest, event: EventInfo) {
   }
 }
 
+function buildDinnerCancelledHtml(guest: Guest, event: EventInfo) {
+  const firstName = guest.name?.split(" ")[0] || "friend"
+  const venue = event.restaurant ? ` at ${event.restaurant}` : ""
+  const dateLine = event.date ? `${formatDate(event.date)}${event.time ? ` at ${formatTime(event.time)}` : ""}` : ""
+  const upcomingUrl = getBaseUrl()
+  return `
+  <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; background: #faf7f2; padding: 32px; border-radius: 16px; color: #2c2418;">
+    <h1 style="font-size: 24px; margin: 0 0 4px;">A change of plans, ${firstName}</h1>
+    <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">We're sorry to share that your upcoming dinner${venue}${dateLine ? ` on ${dateLine}` : ""} has been cancelled. We weren't able to confirm enough guests for this table to make it the warm, lively evening we want every dinner to be.</p>
+
+    <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; margin-bottom: 20px; font-family: Helvetica, Arial, sans-serif;">
+      <p style="font-size: 15px; color: #2c2418; margin: 0 0 12px; line-height: 1.6;">There's nothing you need to do — you won't be charged, and there's no need to reply. We'd love to seat you at a future dinner, so you're welcome to pick another night that works for you.</p>
+      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Thank you for being so flexible. Bringing the right group together sometimes takes a little patience, and we appreciate yours.</p>
+    </div>
+
+    <div style="text-align: center; margin: 0 0 20px;">
+      <a href="${upcomingUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">See upcoming dinners</a>
+    </div>
+
+    <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">We truly hope to host you soon.</p>
+    <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
+  </div>`
+}
+
+export async function sendDinnerCancelled(guest: Guest, event: EventInfo) {
+  if (!resend) {
+    return { ok: false, error: "RESEND_API_KEY is not configured." as string }
+  }
+  if (!guest.email) {
+    return { ok: false, error: "Guest has no email address." }
+  }
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: guest.email,
+      subject: `Your dinner${event.restaurant ? ` at ${event.restaurant}` : ""} has been cancelled`,
+      html: buildDinnerCancelledHtml(guest, event),
+    })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." }
+  }
+}
+
 export async function sendDinnerDetails(guest: Guest, event: EventInfo, seatIndex = 0) {
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
