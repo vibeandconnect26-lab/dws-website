@@ -9,6 +9,7 @@ import {
   duplicateEvent,
   moveGuestToEvent,
   removeGuestFromTable,
+  resendConfirmation,
   sendDinnerDetailsToTable,
   sendFeedbackRequests,
   sendReminders,
@@ -435,6 +436,40 @@ function EventDetail({
 
   const [removingGuestId, setRemovingGuestId] = useState<number | null>(null)
   const [removeNotice, setRemoveNotice] = useState<Record<string, string>>({})
+
+  // Resend the confirmation email to a table's still-pending guests. We pass the
+  // full ordered list of the table's guests so the server keeps seat-specific
+  // prompts consistent; confirmed/cancelled guests are skipped server-side.
+  const [resendingTable, setResendingTable] = useState<string | null>(null)
+  const [resendNotice, setResendNotice] = useState<Record<string, string>>({})
+
+  const handleResendConfirmation = async (label: string, tableGuests: Guest[]) => {
+    setResendingTable(label)
+    setResendNotice((prev) => ({ ...prev, [label]: "" }))
+    const result = await resendConfirmation(
+      tableGuests.map((g) => g.id),
+      event.id,
+    )
+    setResendingTable(null)
+    if (result.sent > 0) {
+      setGuests((prev) =>
+        prev.map((g) =>
+          g.table_label === label && !g.confirmed && !g.cancelled
+            ? { ...g, details_sent_at: new Date().toISOString() }
+            : g,
+        ),
+      )
+    }
+    const parts: string[] = []
+    if (result.sent > 0) parts.push(`${result.sent} confirmation${result.sent === 1 ? "" : "s"} resent`)
+    if (result.skipped > 0) parts.push(`${result.skipped} skipped`)
+    if (result.failed > 0) parts.push(`${result.failed} failed`)
+    if (result.errors.length > 0) parts.push(result.errors.join("; "))
+    setResendNotice((prev) => ({
+      ...prev,
+      [label]: parts.join(" · ") || "No pending guests to resend to.",
+    }))
+  }
 
   // Pull a guest off a sent table, return them to the pending pool, and email
   // them a "system error / please disregard" notice. Reflects the change in all
@@ -1119,13 +1154,36 @@ function EventDetail({
           <div className="flex flex-col gap-4">
             {sentTables.map((t) => {
               const confirmedCount = t.guests.filter((g) => guestStatus(g.id) === "confirmed").length
+              const pendingCount = t.guests.filter((g) => guestStatus(g.id) === "pending").length
               return (
                 <div key={t.label} className="rounded-xl border border-border bg-secondary/40 p-5">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <h4 className="font-serif text-lg text-foreground">{t.label}</h4>
-                    <span className="text-[12px] text-muted-foreground">
-                      {confirmedCount}/{t.guests.length} confirmed
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[12px] text-muted-foreground">
+                        {confirmedCount}/{t.guests.length} confirmed
+                      </span>
+                      {pendingCount > 0 && (
+                        <button
+                          onClick={() => handleResendConfirmation(t.label, t.guests)}
+                          disabled={resendingTable === t.label}
+                          title={`Resend the confirmation email to ${pendingCount} pending guest${pendingCount === 1 ? "" : "s"} at ${t.label}`}
+                          className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[12px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                        >
+                          {resendingTable === t.label ? (
+                            <>
+                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                              Resending...
+                            </>
+                          ) : (
+                            <>
+                              <MailCheck className="size-3.5" aria-hidden="true" />
+                              Resend confirmation ({pendingCount})
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
                     {event.date && (
@@ -1191,6 +1249,9 @@ function EventDetail({
                   </div>
                   {removeNotice[t.label] && (
                     <p className="mt-3 text-[12px] text-muted-foreground">{removeNotice[t.label]}</p>
+                  )}
+                  {resendNotice[t.label] && (
+                    <p className="mt-3 text-[12px] text-muted-foreground">{resendNotice[t.label]}</p>
                   )}
                 </div>
               )

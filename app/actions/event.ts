@@ -319,6 +319,54 @@ export async function sendDinnerDetailsToTable(
   return { sent, failed, errors }
 }
 
+// Re-sends the dinner details / confirmation email to guests who were already
+// emailed but haven't confirmed (or cancelled) yet. Pass the full ordered list
+// of a table's guest IDs so seat-specific prompts stay consistent — confirmed
+// and cancelled guests are skipped automatically.
+export async function resendConfirmation(
+  guestIds: number[],
+  eventId: number,
+): Promise<{ sent: number; failed: number; skipped: number; errors: string[] }> {
+  const event = await getEvent(eventId)
+  if (!event || !event.restaurant) {
+    return { sent: 0, failed: 0, skipped: 0, errors: ["Add event details before sending."] }
+  }
+  if (!guestIds || guestIds.length === 0) {
+    return { sent: 0, failed: 0, skipped: 0, errors: ["No guests to resend to."] }
+  }
+
+  const rows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)}
+    FROM guests
+    WHERE id = ANY(${guestIds})
+    ORDER BY submitted_at ASC
+  `) as Guest[]
+
+  let sent = 0
+  let failed = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  for (const [seatIndex, guest] of rows.entries()) {
+    // Only resend to guests already emailed who haven't confirmed or cancelled.
+    if (!guest.details_sent_at || guest.confirmed || guest.cancelled) {
+      skipped++
+      continue
+    }
+    const result = await sendDinnerDetails(guest, event, seatIndex)
+    if (result.ok) {
+      sent++
+      await sql`UPDATE guests SET details_sent_at = now() WHERE id = ${guest.id}`
+    } else {
+      failed++
+      if (result.error && !errors.includes(result.error)) errors.push(result.error)
+    }
+  }
+
+  revalidatePath("/")
+  return { sent, failed, skipped, errors }
+}
+
 // Removes a guest from a sent table and returns them to the pending pool.
 // Clears their table assignment + sent/confirm/cancel state, then emails a
 // "please disregard / system error" notice letting them know they're safe.
