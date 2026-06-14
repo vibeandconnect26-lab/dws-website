@@ -239,6 +239,91 @@ export async function sendSystemErrorNotice(guest: Guest, event: EventInfo) {
   }
 }
 
+// Short receipt sent right after a guest confirms from the email/landing page,
+// so they have proof in their inbox that their spot is locked in.
+function buildConfirmationReceiptHtml(guest: Guest, event: EventInfo) {
+  const firstName = guest.name?.split(" ")[0] || "friend"
+  const venue = event.restaurant ? ` at ${event.restaurant}` : ""
+  const dateLine = event.date ? `${formatDate(event.date)}${event.time ? ` at ${formatTime(event.time)}` : ""}` : ""
+  return `
+  <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; background: #faf7f2; padding: 32px; border-radius: 16px; color: #2c2418;">
+    <h1 style="font-size: 24px; margin: 0 0 4px;">You're confirmed, ${firstName}!</h1>
+    <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">Thank you for confirming. Your seat${venue}${dateLine ? ` on ${dateLine}` : ""} is locked in, and we can't wait to host you.</p>
+
+    <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; font-family: Helvetica, Arial, sans-serif;">
+      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Keep an eye on your inbox for any last details before the dinner. If your plans change, just reply to this email and let us know.</p>
+    </div>
+
+    <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
+  </div>`
+}
+
+export async function sendConfirmationReceipt(guest: Guest, event: EventInfo) {
+  if (!resend) {
+    return { ok: false, error: "RESEND_API_KEY is not configured." as string }
+  }
+  if (!guest.email) {
+    return { ok: false, error: "Guest has no email address." }
+  }
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: guest.email,
+      subject: `You're confirmed${event.restaurant ? ` for ${event.restaurant}` : ""}!`,
+      html: buildConfirmationReceiptHtml(guest, event),
+    })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." }
+  }
+}
+
+// Short receipt sent right after a guest cancels their own spot, so they know
+// the cancellation went through.
+function buildCancellationReceiptHtml(guest: Guest, event: EventInfo) {
+  const firstName = guest.name?.split(" ")[0] || "friend"
+  const venue = event.restaurant ? ` at ${event.restaurant}` : ""
+  const dateLine = event.date ? `${formatDate(event.date)}${event.time ? ` at ${formatTime(event.time)}` : ""}` : ""
+  const upcomingUrl = getBaseUrl()
+  return `
+  <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; background: #faf7f2; padding: 32px; border-radius: 16px; color: #2c2418;">
+    <h1 style="font-size: 24px; margin: 0 0 4px;">Your spot has been released, ${firstName}</h1>
+    <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">Thanks for letting us know. We've cancelled your reservation${venue}${dateLine ? ` on ${dateLine}` : ""} — there's nothing more you need to do.</p>
+
+    <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; margin-bottom: 20px; font-family: Helvetica, Arial, sans-serif;">
+      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">We'd still love to share a table with you. Whenever you're ready, you can pick another night that works better.</p>
+    </div>
+
+    <div style="text-align: center; margin: 0 0 20px;">
+      <a href="${upcomingUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">See upcoming dinners</a>
+    </div>
+
+    <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
+  </div>`
+}
+
+export async function sendCancellationReceipt(guest: Guest, event: EventInfo) {
+  if (!resend) {
+    return { ok: false, error: "RESEND_API_KEY is not configured." as string }
+  }
+  if (!guest.email) {
+    return { ok: false, error: "Guest has no email address." }
+  }
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: guest.email,
+      subject: `Your spot has been cancelled${event.restaurant ? ` — ${event.restaurant}` : ""}`,
+      html: buildCancellationReceiptHtml(guest, event),
+    })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." }
+  }
+}
+
 function buildDinnerCancelledHtml(guest: Guest, event: EventInfo) {
   const firstName = guest.name?.split(" ")[0] || "friend"
   const venue = event.restaurant ? ` at ${event.restaurant}` : ""
