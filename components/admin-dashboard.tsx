@@ -6,6 +6,7 @@ import {
   createEvent,
   deleteEvent,
   deleteGuest,
+  duplicateEvent,
   moveGuestToEvent,
   removeGuestFromTable,
   sendDinnerDetailsToTable,
@@ -24,6 +25,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
+  Copy,
   GripVertical,
   Loader2,
   Lock,
@@ -111,6 +113,18 @@ export function AdminDashboard({
     setEvents((prev) => prev.map((e) => (e.id === event.id ? { ...e, isOpen: next } : e)))
     await setEventOpen(event.id, next)
     setBusyEventId(null)
+  }
+
+  // Copies a dinner's details into a fresh event and opens it for editing,
+  // so the admin can tweak the date/restaurant and publish without re-typing.
+  const handleDuplicateEvent = async (event: EventInfo) => {
+    setBusyEventId(event.id)
+    const copy = await duplicateEvent(event.id)
+    setBusyEventId(null)
+    if (copy) {
+      setEvents((prev) => [copy, ...prev])
+      setSelectedId(copy.id)
+    }
   }
 
   const handleDeleteEvent = async (event: EventInfo) => {
@@ -267,6 +281,19 @@ export function AdminDashboard({
                     className="rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
                   >
                     {event.isOpen ? "Close signups" : "Open signups"}
+                  </button>
+                  <button
+                    onClick={() => handleDuplicateEvent(event)}
+                    disabled={busyEventId === event.id}
+                    title="Create a new dinner pre-filled with these details"
+                    className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                  >
+                    {busyEventId === event.id ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Copy className="size-3.5" aria-hidden="true" />
+                    )}
+                    Duplicate
                   </button>
                   <button
                     onClick={() => handleDeleteEvent(event)}

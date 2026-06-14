@@ -118,6 +118,26 @@ export async function createEvent(draft: EventDraft): Promise<EventInfo> {
   return mapEvent(rows[0])
 }
 
+// Creates a new dinner pre-filled with another dinner's details so the admin
+// can spin up similar events quickly. Guests are NOT copied, the date/time are
+// cleared (each event needs its own), and the copy starts closed for signups.
+export async function duplicateEvent(eventId: number): Promise<EventInfo | null> {
+  const source = await getEvent(eventId)
+  if (!source) return null
+
+  const rows = (await sql`
+    INSERT INTO events (restaurant, address, event_date, event_time, max_guests, dress_code, notes, is_open)
+    VALUES (
+      ${source.restaurant ? `${source.restaurant} (Copy)` : ""},
+      ${source.address}, ${""}, ${""},
+      ${source.maxGuests}, ${source.dressCode}, ${source.notes}, ${false}
+    )
+    RETURNING id, restaurant, address, event_date, event_time, max_guests, dress_code, notes, is_open
+  `) as EventRow[]
+  revalidatePath("/")
+  return mapEvent(rows[0])
+}
+
 export async function updateEvent(info: EventInfo): Promise<{ success: boolean }> {
   await sql`
     UPDATE events SET
