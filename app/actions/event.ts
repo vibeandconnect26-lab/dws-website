@@ -2,7 +2,14 @@
 
 import { sql } from "@/lib/db"
 import { type EventInfo, type EventDraft, emptyEventInfo, type Guest } from "@/lib/questions"
-import { sendDinnerCancelled, sendDinnerDetails, sendFeedbackRequest, sendSystemErrorNotice } from "@/lib/email"
+import {
+  sendCancellationReceipt,
+  sendConfirmationReceipt,
+  sendDinnerCancelled,
+  sendDinnerDetails,
+  sendFeedbackRequest,
+  sendSystemErrorNotice,
+} from "@/lib/email"
 import { normalizePhone, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
@@ -480,8 +487,8 @@ export async function confirmByToken(
   token: string,
 ): Promise<{ ok: boolean; alreadyConfirmed: boolean; cancelled: boolean }> {
   const rows = (await sql`
-    SELECT confirmed, cancelled FROM guests WHERE cancel_token = ${token}
-  `) as { confirmed: boolean; cancelled: boolean }[]
+    SELECT ${sql.unsafe(GUEST_COLUMNS)} FROM guests WHERE cancel_token = ${token}
+  `) as Guest[]
 
   if (rows.length === 0) return { ok: false, alreadyConfirmed: false, cancelled: false }
   if (rows[0].cancelled) return { ok: false, alreadyConfirmed: false, cancelled: true }
@@ -491,6 +498,15 @@ export async function confirmByToken(
     UPDATE guests SET confirmed = true, confirmed_at = now() WHERE cancel_token = ${token}
   `
   revalidatePath("/")
+
+  // Send a short "you're confirmed" receipt so the guest has proof in their
+  // inbox. Email failures shouldn't block the confirmation itself.
+  const event = rows[0].event_id ? await getEvent(rows[0].event_id) : null
+  if (event) {
+    const result = await sendConfirmationReceipt(rows[0], event)
+    if (!result.ok && result.error) console.log("[v0] confirmation receipt failed:", result.error)
+  }
+
   return { ok: true, alreadyConfirmed: false, cancelled: false }
 }
 
@@ -554,8 +570,8 @@ export async function sendReminders(opts?: { eventId?: number; onlyUnsent?: bool
 
 export async function cancelByToken(token: string): Promise<{ ok: boolean; alreadyCancelled: boolean }> {
   const rows = (await sql`
-    SELECT cancelled FROM guests WHERE cancel_token = ${token}
-  `) as { cancelled: boolean }[]
+    SELECT ${sql.unsafe(GUEST_COLUMNS)} FROM guests WHERE cancel_token = ${token}
+  `) as Guest[]
 
   if (rows.length === 0) return { ok: false, alreadyCancelled: false }
   if (rows[0].cancelled) return { ok: true, alreadyCancelled: true }
@@ -564,6 +580,15 @@ export async function cancelByToken(token: string): Promise<{ ok: boolean; alrea
     UPDATE guests SET cancelled = true, cancelled_at = now() WHERE cancel_token = ${token}
   `
   revalidatePath("/")
+
+  // Send a short "your spot is released" receipt so the guest knows the
+  // cancellation went through. Email failures shouldn't block the cancellation.
+  const event = rows[0].event_id ? await getEvent(rows[0].event_id) : null
+  if (event) {
+    const result = await sendCancellationReceipt(rows[0], event)
+    if (!result.ok && result.error) console.log("[v0] cancellation receipt failed:", result.error)
+  }
+
   return { ok: true, alreadyCancelled: false }
 }
 
