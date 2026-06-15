@@ -1,14 +1,24 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { questions, type EventInfo, type EventDraft, type Guest, type TableGroup } from "@/lib/questions"
 import {
+  questions,
+  type EventInfo,
+  type EventDraft,
+  type Guest,
+  type TableGroup,
+  type PoolContact,
+} from "@/lib/questions"
+import {
+  assignPoolContactToEvent,
   cancelDinnerForGuests,
   createEvent,
   deleteEvent,
   deleteGuest,
+  deletePoolContact,
   duplicateEvent,
   moveGuestToEvent,
+  moveGuestToPool,
   removeGuestFromTable,
   resendConfirmation,
   sendDinnerDetailsToTable,
@@ -41,6 +51,8 @@ import {
   Star,
   Trash2,
   Unlock,
+  UserPlus,
+  Users,
   X,
   XCircle,
 } from "lucide-react"
@@ -70,18 +82,21 @@ export function AdminDashboard({
   events: initialEvents,
   counts: initialCounts,
   guestsByEvent,
+  poolContacts: initialPoolContacts,
 }: {
   events: EventInfo[]
   counts: Counts
   guestsByEvent: GuestsByEvent
+  poolContacts: PoolContact[]
 }) {
   const [events, setEvents] = useState(initialEvents)
   const [counts] = useState(initialCounts)
+  const [poolContacts, setPoolContacts] = useState(initialPoolContacts)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
   const [savingEvent, setSavingEvent] = useState(false)
   const [busyEventId, setBusyEventId] = useState<number | null>(null)
-  const [adminTab, setAdminTab] = useState<"dinners" | "reviews">("dinners")
+  const [adminTab, setAdminTab] = useState<"dinners" | "pool" | "reviews">("dinners")
 
   // Overall average rating across every event, for the Reviews tab badge.
   const reviewStats = useMemo(() => {
@@ -149,6 +164,7 @@ export function AdminDashboard({
         initialCancelled={guestsByEvent[selectedEvent.id]?.cancelledGuests ?? []}
         onBack={() => setSelectedId(null)}
         onEdited={(updated) => setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))}
+        onMovedToPool={(contact) => setPoolContacts((prev) => [contact, ...prev])}
       />
     )
   }
@@ -166,6 +182,28 @@ export function AdminDashboard({
           )}
         >
           Dinners
+        </button>
+        <button
+          onClick={() => setAdminTab("pool")}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            adminTab === "pool"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Users className="size-3.5" aria-hidden="true" />
+          Pool
+          {poolContacts.length > 0 && (
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+                adminTab === "pool" ? "bg-primary-foreground/20" : "bg-secondary text-[var(--gold-dark)]",
+              )}
+            >
+              {poolContacts.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setAdminTab("reviews")}
@@ -196,6 +234,8 @@ export function AdminDashboard({
           <h2 className="mb-6 font-serif text-3xl text-foreground">Reviews</h2>
           <ReviewsTab events={events} guestsByEvent={guestsByEvent} />
         </>
+      ) : adminTab === "pool" ? (
+        <PoolTab events={events} poolContacts={poolContacts} onChange={setPoolContacts} />
       ) : (
         <>
           <div className="mb-6 flex items-center justify-between gap-4">
@@ -327,6 +367,7 @@ function EventDetail({
   initialCancelled,
   onBack,
   onEdited,
+  onMovedToPool,
 }: {
   event: EventInfo
   allEvents: EventInfo[]
@@ -335,6 +376,7 @@ function EventDetail({
   initialCancelled: Guest[]
   onBack: () => void
   onEdited: (event: EventInfo) => void
+  onMovedToPool: (contact: PoolContact) => void
 }) {
   const [event, setEvent] = useState(initialEvent)
   const [editing, setEditing] = useState(false)
@@ -617,6 +659,24 @@ function EventDetail({
       })
     } else {
       setMoveError((prev) => ({ ...prev, [guest.id]: result.error || "Could not move guest." }))
+    }
+  }
+
+  // Mark a pending guest as unassigned: remove them from this dinner and save
+  // their profile to the standing pool so they can be placed into a dinner later.
+  const [poolingGuestId, setPoolingGuestId] = useState<number | null>(null)
+  const handleMoveToPool = async (guest: Guest) => {
+    setPoolingGuestId(guest.id)
+    setMoveError((prev) => ({ ...prev, [guest.id]: "" }))
+    const result = await moveGuestToPool(guest.id)
+    setPoolingGuestId(null)
+    if (result.ok && result.contact) {
+      setGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setConfirmedGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setCancelledGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      onMovedToPool(result.contact)
+    } else {
+      setMoveError((prev) => ({ ...prev, [guest.id]: result.error || "Could not move guest to the pool." }))
     }
   }
 
@@ -918,6 +978,19 @@ function EventDetail({
                   >
                     <Trash2 className="size-3.5" aria-hidden="true" />
                     Remove
+                  </button>
+                  <button
+                    onClick={() => handleMoveToPool(g)}
+                    disabled={poolingGuestId === g.id}
+                    title={`Move ${g.name} to the unassigned pool`}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                  >
+                    {poolingGuestId === g.id ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Users className="size-3.5" aria-hidden="true" />
+                    )}
+                    Move to pool
                   </button>
                   {otherEvents.length > 0 && (
                     <div className="flex flex-col gap-1.5">
@@ -1583,6 +1656,144 @@ function Tag({ children }: { children: React.ReactNode }) {
     <span className="rounded-full bg-[var(--gold)]/12 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--gold-dark)]">
       {children}
     </span>
+  )
+}
+
+// The standing pool of unassigned guests. Hosts set people aside here from any
+// dinner's pending list, then place them into a dinner later via the dropdown.
+function PoolTab({
+  events,
+  poolContacts,
+  onChange,
+}: {
+  events: EventInfo[]
+  poolContacts: PoolContact[]
+  onChange: (next: PoolContact[]) => void
+}) {
+  const [assignSelection, setAssignSelection] = useState<Record<number, number | "">>({})
+  const [assigningId, setAssigningId] = useState<number | null>(null)
+  const [removingId, setRemovingId] = useState<number | null>(null)
+  const [error, setError] = useState<Record<number, string>>({})
+
+  const handleAssign = async (contact: PoolContact) => {
+    const targetId = assignSelection[contact.id]
+    if (!targetId) return
+    setAssigningId(contact.id)
+    setError((prev) => ({ ...prev, [contact.id]: "" }))
+    const result = await assignPoolContactToEvent(contact.id, Number(targetId))
+    setAssigningId(null)
+    if (result.ok) {
+      onChange(poolContacts.filter((c) => c.id !== contact.id))
+    } else {
+      setError((prev) => ({ ...prev, [contact.id]: result.error || "Could not add to dinner." }))
+    }
+  }
+
+  const handleRemove = async (contact: PoolContact) => {
+    if (!confirm(`Remove ${contact.name} from the pool? This cannot be undone.`)) return
+    setRemovingId(contact.id)
+    await deletePoolContact(contact.id)
+    setRemovingId(null)
+    onChange(poolContacts.filter((c) => c.id !== contact.id))
+  }
+
+  return (
+    <>
+      <h2 className="mb-1.5 font-serif text-3xl text-foreground">Guest Pool</h2>
+      <p className="mb-6 max-w-2xl text-sm text-muted-foreground">
+        People you&apos;ve set aside from a dinner&apos;s pending list. They&apos;re not attached to any dinner until
+        you place them into one — pick a dinner below and they&apos;ll join it as a fresh pending guest.
+      </p>
+
+      {poolContacts.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
+          <Users className="mx-auto mb-3 size-7 text-muted-foreground" aria-hidden="true" />
+          <p className="font-medium text-foreground">Your pool is empty</p>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Open a dinner, then use &quot;Move to pool&quot; on a pending guest to set them aside here.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {poolContacts.map((c) => (
+            <div
+              key={c.id}
+              className="flex flex-col gap-4 rounded-xl border border-border bg-card px-6 py-5 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div className="flex-1">
+                <span className="text-base font-semibold text-foreground">{c.name}</span>
+                <div className="mb-1 mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                  <Mail className="size-3.5" aria-hidden="true" />
+                  <a href={`mailto:${c.email}`} className="hover:text-foreground hover:underline">
+                    {c.email}
+                  </a>
+                </div>
+                <div className="mb-2 text-[13px] text-muted-foreground">
+                  {[c.age_range, c.neighborhood, c.energy?.split("—")[0].trim()].filter(Boolean).join(" · ")}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(c.talk_about || []).map((t) => (
+                    <Tag key={t}>{t}</Tag>
+                  ))}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col items-stretch gap-2 sm:w-64">
+                <div className="flex items-center gap-1.5">
+                  <label className="sr-only" htmlFor={`assign-${c.id}`}>
+                    Add {c.name} to a dinner
+                  </label>
+                  <select
+                    id={`assign-${c.id}`}
+                    value={assignSelection[c.id] ?? ""}
+                    onChange={(e) =>
+                      setAssignSelection((prev) => ({
+                        ...prev,
+                        [c.id]: e.target.value ? Number(e.target.value) : "",
+                      }))
+                    }
+                    className="min-w-0 flex-1 rounded-lg border-[1.5px] border-input bg-card px-2.5 py-1.5 text-[13px] outline-none transition-colors focus:border-[var(--gold)]"
+                  >
+                    <option value="">Add to dinner…</option>
+                    {events.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.restaurant || "Untitled Dinner"}
+                        {e.date ? ` · ${formatDate(e.date)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleAssign(c)}
+                    disabled={!assignSelection[c.id] || assigningId === c.id}
+                    title={`Add ${c.name} to the selected dinner`}
+                    aria-label={`Add ${c.name} to the selected dinner`}
+                    className="inline-flex items-center justify-center rounded-lg bg-primary px-2.5 py-1.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    {assigningId === c.id ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <UserPlus className="size-3.5" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                <button
+                  onClick={() => handleRemove(c)}
+                  disabled={removingId === c.id}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                >
+                  {removingId === c.id ? (
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Trash2 className="size-3.5" aria-hidden="true" />
+                  )}
+                  Remove from pool
+                </button>
+                {error[c.id] && <p className="text-[12px] text-destructive">{error[c.id]}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 
