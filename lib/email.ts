@@ -334,19 +334,19 @@ function buildNotChosenHtml(guest: Guest, event: EventInfo) {
   const dinnersUrl = getBaseUrl()
   return `
   <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; background: #faf7f2; padding: 32px; border-radius: 16px; color: #2c2418;">
-    <h1 style="font-size: 24px; margin: 0 0 4px;">Thank you for your interest, ${firstName}</h1>
-    <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">Thank you so much for signing up for the dinner${venue}${dateLine ? ` on ${dateLine}` : ""}. We had more wonderful people request a seat than we could fit at this particular table, so we weren&apos;t able to include you this time.</p>
+    <h1 style="font-size: 24px; margin: 0 0 4px;">Let&apos;s find your seat, ${firstName}!</h1>
+    <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">Thanks so much for requesting a spot at the dinner${venue}${dateLine ? ` on ${dateLine}` : ""}! This one filled up fast — we had way more requests than seats at the table, so it&apos;s already full.</p>
 
     <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; margin-bottom: 20px; font-family: Helvetica, Arial, sans-serif;">
-      <p style="font-size: 15px; color: #2c2418; margin: 0 0 12px; line-height: 1.6;">Please don&apos;t be discouraged — this isn&apos;t a no, just a not-this-table. We carefully curate each dinner to bring the right mix of people together, and we&apos;d genuinely love to seat you at an upcoming one.</p>
-      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Browse our other dinners and grab a spot at whichever night feels right for you.</p>
+      <p style="font-size: 15px; color: #2c2418; margin: 0 0 12px; line-height: 1.6;">Here&apos;s the good news: there are plenty more dinners coming up, and we&apos;d love to see you at one of them. Your spot at the table is still waiting — just on a different night!</p>
+      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Take a look at what&apos;s next and grab the seat that works best for you.</p>
     </div>
 
     <div style="text-align: center; margin: 0 0 20px;">
       <a href="${dinnersUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Choose another dinner</a>
     </div>
 
-    <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">We hope to share a table with you soon.</p>
+    <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">Can&apos;t wait to share a table with you soon!</p>
     <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
   </div>`
 }
@@ -362,7 +362,7 @@ export async function sendNotChosenNotice(guest: Guest, event: EventInfo) {
     const { error } = await resend.emails.send({
       from: FROM,
       to: guest.email,
-      subject: `An update on your dinner request${event.restaurant ? ` — ${event.restaurant}` : ""}`,
+      subject: `That dinner filled up — let's find you another seat!`,
       html: buildNotChosenHtml(guest, event),
     })
     if (error) return { ok: false, error: error.message }
