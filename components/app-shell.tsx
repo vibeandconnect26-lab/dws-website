@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Image from "next/image"
-import { type EventInfo, type Guest } from "@/lib/questions"
+import { type EventInfo, type Guest, type PoolContact } from "@/lib/questions"
 import { verifyAdmin } from "@/app/actions/event"
 import { Questionnaire } from "@/components/questionnaire"
 import { EventPicker } from "@/components/event-picker"
@@ -24,11 +24,13 @@ export function AppShell({
   openEvents,
   counts,
   guestsByEvent,
+  poolContacts,
 }: {
   events: EventInfo[]
   openEvents: EventInfo[]
   counts: Counts
   guestsByEvent: GuestsByEvent
+  poolContacts: PoolContact[]
 }) {
   const [view, setView] = useState<View>("form")
   const [adminUnlocked, setAdminUnlocked] = useState(false)
@@ -113,7 +115,12 @@ export function AppShell({
           <EventPicker events={openEvents} onSelect={(e) => setSelectedEvent(e)} />
         )
       ) : (
-        <AdminDashboard events={events} counts={counts} guestsByEvent={guestsByEvent} />
+        <AdminDashboard
+          events={events}
+          counts={counts}
+          guestsByEvent={guestsByEvent}
+          poolContacts={poolContacts}
+        />
       )}
 
       {showPinModal && (

@@ -1,7 +1,14 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { questions, type EventInfo, type EventDraft, type Guest, type TableGroup } from "@/lib/questions"
+import {
+  questions,
+  type EventInfo,
+  type EventDraft,
+  type Guest,
+  type TableGroup,
+  type PoolContact,
+} from "@/lib/questions"
 import {
   cancelDinnerForGuests,
   confirmGuestManually,
@@ -18,17 +25,22 @@ import {
   setEventOpen,
   updateEvent,
 } from "@/app/actions/event"
+import { savePoolContactFromGuest, importPoolContactsToEvent } from "@/app/actions/pool"
 import { EventEditor } from "@/components/event-editor"
 import { ReviewsTab } from "@/components/reviews-tab"
+import { PoolTab } from "@/components/pool-tab"
 import type { GuestsByEvent } from "@/components/app-shell"
 import { cn } from "@/lib/utils"
 import {
   ArrowLeft,
   ArrowRightLeft,
+  Bookmark,
+  BookmarkCheck,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
   Copy,
+  Download,
   GripVertical,
   Loader2,
   Lock,
@@ -42,6 +54,7 @@ import {
   Star,
   Trash2,
   Unlock,
+  Users,
   X,
   XCircle,
 } from "lucide-react"
@@ -71,10 +84,12 @@ export function AdminDashboard({
   events: initialEvents,
   counts: initialCounts,
   guestsByEvent,
+  poolContacts: initialPool,
 }: {
   events: EventInfo[]
   counts: Counts
   guestsByEvent: GuestsByEvent
+  poolContacts: PoolContact[]
 }) {
   const [events, setEvents] = useState(initialEvents)
   const [counts] = useState(initialCounts)
@@ -82,7 +97,15 @@ export function AdminDashboard({
   const [creating, setCreating] = useState(false)
   const [savingEvent, setSavingEvent] = useState(false)
   const [busyEventId, setBusyEventId] = useState<number | null>(null)
-  const [adminTab, setAdminTab] = useState<"dinners" | "reviews">("dinners")
+  const [adminTab, setAdminTab] = useState<"dinners" | "reviews" | "pool">("dinners")
+
+  // The permanent pool of saved contacts, shared across the Pool tab and the
+  // per-dinner save/import controls so counts stay in sync without a refetch.
+  const [poolContacts, setPoolContacts] = useState(initialPool)
+  const addPoolContact = (c: PoolContact) =>
+    setPoolContacts((prev) => (prev.some((p) => p.id === c.id) ? prev : [c, ...prev]))
+  const removePoolContacts = (ids: number[]) =>
+    setPoolContacts((prev) => prev.filter((p) => !ids.includes(p.id)))
 
   // Overall average rating across every event, for the Reviews tab badge.
   const reviewStats = useMemo(() => {
@@ -148,6 +171,9 @@ export function AdminDashboard({
         initialGuests={guestsByEvent[selectedEvent.id]?.guests ?? []}
         initialConfirmed={guestsByEvent[selectedEvent.id]?.confirmedGuests ?? []}
         initialCancelled={guestsByEvent[selectedEvent.id]?.cancelledGuests ?? []}
+        poolContacts={poolContacts}
+        onPoolContactSaved={addPoolContact}
+        onPoolContactsImported={removePoolContacts}
         onBack={() => setSelectedId(null)}
         onEdited={(updated) => setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))}
       />
@@ -190,12 +216,39 @@ export function AdminDashboard({
             </span>
           )}
         </button>
+        <button
+          onClick={() => setAdminTab("pool")}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            adminTab === "pool"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Users className="size-3.5" aria-hidden="true" />
+          Pool
+          {poolContacts.length > 0 && (
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+                adminTab === "pool" ? "bg-primary-foreground/20" : "bg-secondary text-[var(--gold-dark)]",
+              )}
+            >
+              {poolContacts.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {adminTab === "reviews" ? (
         <>
           <h2 className="mb-6 font-serif text-3xl text-foreground">Reviews</h2>
           <ReviewsTab events={events} guestsByEvent={guestsByEvent} />
+        </>
+      ) : adminTab === "pool" ? (
+        <>
+          <h2 className="mb-6 font-serif text-3xl text-foreground">Contact Pool</h2>
+          <PoolTab contacts={poolContacts} onDelete={(id) => removePoolContacts([id])} />
         </>
       ) : (
         <>
@@ -326,6 +379,9 @@ function EventDetail({
   initialGuests,
   initialConfirmed,
   initialCancelled,
+  poolContacts,
+  onPoolContactSaved,
+  onPoolContactsImported,
   onBack,
   onEdited,
 }: {
@@ -334,6 +390,9 @@ function EventDetail({
   initialGuests: Guest[]
   initialConfirmed: Guest[]
   initialCancelled: Guest[]
+  poolContacts: PoolContact[]
+  onPoolContactSaved: (c: PoolContact) => void
+  onPoolContactsImported: (ids: number[]) => void
   onBack: () => void
   onEdited: (event: EventInfo) => void
 }) {
@@ -343,6 +402,85 @@ function EventDetail({
   const [guests, setGuests] = useState(initialGuests)
   const [confirmedGuests, setConfirmedGuests] = useState(initialConfirmed)
   const [cancelledGuests, setCancelledGuests] = useState(initialCancelled)
+
+  // Save-to-pool: track which guest ids are saved/in-flight so the icon can
+  // reflect state. We seed "saved" from the pool contacts that originated here.
+  const [savingPoolId, setSavingPoolId] = useState<number | null>(null)
+  const [savedGuestIds, setSavedGuestIds] = useState<Set<number>>(
+    () => new Set(poolContacts.map((c) => c.source_guest_id).filter((v): v is number => v != null)),
+  )
+
+  const handleSaveToPool = async (guest: Guest) => {
+    if (savedGuestIds.has(guest.id)) return
+    setSavingPoolId(guest.id)
+    const result = await savePoolContactFromGuest(guest.id)
+    setSavingPoolId(null)
+    if (result.ok) {
+      setSavedGuestIds((prev) => new Set(prev).add(guest.id))
+      if (result.contact && !result.alreadySaved) onPoolContactSaved(result.contact)
+    }
+  }
+
+  // Import-from-pool: pick contacts and bring them in as fresh pending guests.
+  const [importing, setImporting] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [importSelection, setImportSelection] = useState<Set<number>>(new Set())
+  const [importNotice, setImportNotice] = useState("")
+
+  const toggleImportPick = (id: number) =>
+    setImportSelection((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const handleImportFromPool = async () => {
+    const ids = Array.from(importSelection)
+    if (ids.length === 0) return
+    setImporting(true)
+    setImportNotice("")
+    const result = await importPoolContactsToEvent(ids, event.id)
+    setImporting(false)
+    if (result.ok) {
+      setGuests((prev) => [...prev, ...result.guests])
+      onPoolContactsImported(ids)
+      setImportSelection(new Set())
+      setShowImport(false)
+      setImportNotice(`Imported ${result.imported} contact${result.imported === 1 ? "" : "s"} into this dinner.`)
+    } else {
+      setImportNotice(result.error || "Could not import contacts.")
+    }
+  }
+
+  // Compact save-to-pool icon button shared by the pending, confirmed, and
+  // cancelled guest cards. Shows a filled bookmark once the guest is saved.
+  const renderSaveToPool = (g: Guest) => {
+    const saved = savedGuestIds.has(g.id)
+    return (
+      <button
+        onClick={() => handleSaveToPool(g)}
+        disabled={saved || savingPoolId === g.id}
+        title={saved ? `${g.name} is in your contact pool` : `Save ${g.name} to your contact pool`}
+        aria-label={saved ? `${g.name} is in your contact pool` : `Save ${g.name} to your contact pool`}
+        className={cn(
+          "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border-[1.5px] px-3 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-default",
+          saved
+            ? "border-[var(--gold)] bg-[var(--gold)]/10 text-[var(--gold-dark)]"
+            : "border-input bg-card text-foreground hover:border-[var(--gold)]",
+        )}
+      >
+        {savingPoolId === g.id ? (
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        ) : saved ? (
+          <BookmarkCheck className="size-3.5" aria-hidden="true" />
+        ) : (
+          <Bookmark className="size-3.5" aria-hidden="true" />
+        )}
+        {saved ? "Saved" : "Save"}
+      </button>
+    )
+  }
 
   // Source-of-truth status lookup for any guest id, used to badge the
   // grouping chips. The lists are authoritative; chip snapshots may be stale.
@@ -921,6 +1059,91 @@ function EventDetail({
         <Stat num={confirmedGuests.length} label="Confirmed" />
       </div>
 
+      {/* Import from the permanent contact pool */}
+      <div className="mb-8 rounded-2xl border border-border bg-card px-6 py-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 font-serif text-lg text-foreground">
+              <Users className="size-4 text-[var(--gold-dark)]" aria-hidden="true" />
+              Import from pool
+            </h3>
+            <p className="mt-0.5 text-[13px] text-muted-foreground">
+              Add saved contacts to this dinner as pending guests. Imported contacts leave the pool.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setShowImport((s) => !s)
+              setImportNotice("")
+            }}
+            disabled={poolContacts.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-4 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+          >
+            <Download className="size-3.5" aria-hidden="true" />
+            {poolContacts.length === 0
+              ? "Pool is empty"
+              : showImport
+                ? "Close"
+                : `Import (${poolContacts.length} available)`}
+          </button>
+        </div>
+
+        {showImport && poolContacts.length > 0 && (
+          <div className="mt-4 border-t border-border pt-4">
+            <div className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+              {poolContacts.map((c) => (
+                <label
+                  key={c.id}
+                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:border-[var(--gold)]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={importSelection.has(c.id)}
+                    onChange={() => toggleImportPick(c.id)}
+                    className="size-4 shrink-0 accent-[var(--gold-dark)]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] font-medium text-foreground">{c.name}</span>
+                    <span className="block truncate text-[12px] text-muted-foreground">
+                      {[c.email, c.neighborhood].filter(Boolean).join(" · ") || "No contact details"}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                onClick={handleImportFromPool}
+                disabled={importSelection.size === 0 || importing}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {importing ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Download className="size-3.5" aria-hidden="true" />
+                    Import {importSelection.size > 0 ? `${importSelection.size} ` : ""}
+                    {importSelection.size === 1 ? "contact" : "contacts"}
+                  </>
+                )}
+              </button>
+              {importSelection.size > 0 && (
+                <button
+                  onClick={() => setImportSelection(new Set())}
+                  className="text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Clear selection
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {importNotice && <p className="mt-3 text-[13px] text-muted-foreground">{importNotice}</p>}
+      </div>
+
       {unseatedGuests.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">
           {guests.length === 0 && confirmedGuests.length === 0
@@ -1004,6 +1227,7 @@ function EventDetail({
                   )}
                 </div>
                 <div className="flex shrink-0 flex-col items-stretch gap-2">
+                  {renderSaveToPool(g)}
                   <button
                     onClick={() => handleDelete(g.id)}
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
@@ -1648,6 +1872,7 @@ function EventDetail({
                     </div>
                   )}
                 </div>
+                {renderSaveToPool(g)}
               </div>
             ))}
           </div>
@@ -1687,6 +1912,7 @@ function EventDetail({
                         {g.cancelled_at && <span> · cancelled {formatDate(g.cancelled_at, true)}</span>}
                       </div>
                     </div>
+                    {renderSaveToPool(g)}
                   </div>
 
                   {filled ? (

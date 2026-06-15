@@ -122,6 +122,26 @@ export type Guest = {
   feedback_submitted_at: string | null
 }
 
+// A saved contact in the permanent pool. Mirrors the profile fields of a guest
+// (minus event-specific RSVP/seating state) so a contact can be imported into
+// any future dinner as a fresh guest.
+export type PoolContact = {
+  id: number
+  name: string
+  email: string | null
+  phone: string | null
+  age_range: string | null
+  neighborhood: string | null
+  motivation: string | null
+  talk_about: string[]
+  skip_topics: string[]
+  energy: string | null
+  surprise: string | null
+  hope: string | null
+  source_guest_id: number | null
+  created_at: string
+}
+
 export type EventInfo = {
   id: number
   restaurant: string

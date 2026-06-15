@@ -7,11 +7,17 @@ import {
   getConfirmedGuests,
   getCancelledGuests,
 } from "@/app/actions/event"
+import { getPoolContacts } from "@/app/actions/pool"
 
 export const dynamic = "force-dynamic"
 
 export default async function Page() {
-  const [events, openEvents, counts] = await Promise.all([getEvents(), getOpenEvents(), getEventCounts()])
+  const [events, openEvents, counts, poolContacts] = await Promise.all([
+    getEvents(),
+    getOpenEvents(),
+    getEventCounts(),
+    getPoolContacts(),
+  ])
 
   // Preload guest lists for every event so the admin can switch instantly.
   const guestData = await Promise.all(
@@ -32,6 +38,7 @@ export default async function Page() {
       openEvents={openEvents}
       counts={counts}
       guestsByEvent={guestsByEvent}
+      poolContacts={poolContacts}
     />
   )
 }
