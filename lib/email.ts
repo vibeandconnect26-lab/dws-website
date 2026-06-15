@@ -251,7 +251,8 @@ function buildConfirmationReceiptHtml(guest: Guest, event: EventInfo) {
     <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">Thank you for confirming. Your seat${venue}${dateLine ? ` on ${dateLine}` : ""} is locked in, and we can't wait to host you.</p>
 
     <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; font-family: Helvetica, Arial, sans-serif;">
-      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Keep an eye on your inbox for any last details before the dinner. If your plans change, just reply to this email and let us know.</p>
+      <p style="font-size: 14px; color: #6b6253; margin: 0 0 12px; line-height: 1.6;">Keep an eye on your inbox for any last details before the dinner. If your plans change, just reply to this email and let us know.</p>
+      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Have questions or concerns? <a href="mailto:admin@vibeandconnect.org?subject=Question%20about%20my%20dinner%20reservation" style="color: #2c2418; font-weight: 600;">Email our team</a> and we'll be happy to help.</p>
     </div>
 
     <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
