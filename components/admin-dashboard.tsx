@@ -1,17 +1,6 @@
 "use client"
 
 import { useMemo, useState } from "react"
-<<<<<<< HEAD
-import {
-  questions,
-  type EventInfo,
-  type EventDraft,
-  type Guest,
-  type TableGroup,
-  type PoolContact,
-} from "@/lib/questions"
-=======
->>>>>>> origin/main
 import {
   questions,
   type EventInfo,
@@ -30,11 +19,7 @@ import {
   deletePoolContact,
   duplicateEvent,
   moveGuestToEvent,
-<<<<<<< HEAD
-  notifyGuestNotSelected,
-=======
   moveGuestToPool,
->>>>>>> origin/main
   removeGuestFromTable,
   resendConfirmation,
   sendDinnerDetailsToTable,
@@ -43,10 +28,8 @@ import {
   setEventOpen,
   updateEvent,
 } from "@/app/actions/event"
-import { savePoolContactFromGuest, importPoolContactsToEvent } from "@/app/actions/pool"
 import { EventEditor } from "@/components/event-editor"
 import { ReviewsTab } from "@/components/reviews-tab"
-import { PoolTab } from "@/components/pool-tab"
 import type { GuestsByEvent } from "@/components/app-shell"
 import { cn } from "@/lib/utils"
 import {
@@ -73,10 +56,7 @@ import {
   Star,
   Trash2,
   Unlock,
-<<<<<<< HEAD
-=======
   UserPlus,
->>>>>>> origin/main
   Users,
   X,
   XCircle,
@@ -107,11 +87,7 @@ export function AdminDashboard({
   events: initialEvents,
   counts: initialCounts,
   guestsByEvent,
-<<<<<<< HEAD
-  poolContacts: initialPool,
-=======
   poolContacts: initialPoolContacts,
->>>>>>> origin/main
 }: {
   events: EventInfo[]
   counts: Counts
@@ -125,19 +101,7 @@ export function AdminDashboard({
   const [creating, setCreating] = useState(false)
   const [savingEvent, setSavingEvent] = useState(false)
   const [busyEventId, setBusyEventId] = useState<number | null>(null)
-<<<<<<< HEAD
-  const [adminTab, setAdminTab] = useState<"dinners" | "reviews" | "pool">("dinners")
-
-  // The permanent pool of saved contacts, shared across the Pool tab and the
-  // per-dinner save/import controls so counts stay in sync without a refetch.
-  const [poolContacts, setPoolContacts] = useState(initialPool)
-  const addPoolContact = (c: PoolContact) =>
-    setPoolContacts((prev) => (prev.some((p) => p.id === c.id) ? prev : [c, ...prev]))
-  const removePoolContacts = (ids: number[]) =>
-    setPoolContacts((prev) => prev.filter((p) => !ids.includes(p.id)))
-=======
   const [adminTab, setAdminTab] = useState<"dinners" | "pool" | "reviews">("dinners")
->>>>>>> origin/main
 
   // Overall average rating across every event, for the Reviews tab badge.
   const reviewStats = useMemo(() => {
