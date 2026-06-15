@@ -473,7 +473,8 @@ function EventDetail({
   const handleAddToTable = async (tableLabel: string) => {
     const guestId = addSelection[tableLabel]
     if (!guestId) return
-    const guest = unseatedGuests.find((g) => g.id === guestId)
+    // Guest ids can come back from the DB as strings, so compare loosely.
+    const guest = unseatedGuests.find((g) => String(g.id) === String(guestId))
     if (!guest) return
     setAddingToTable(tableLabel)
     setAddNotice((prev) => ({ ...prev, [tableLabel]: "" }))
@@ -836,13 +837,14 @@ function EventDetail({
   const addPoolGuestToParsedTable = (tableName: string) => {
     const guestId = parsedAddSelection[tableName]
     if (!guestId) return
-    const guest = poolForTables.find((g) => g.id === guestId)
+    // Guest ids can come back from the DB as strings, so compare loosely.
+    const guest = poolForTables.find((g) => String(g.id) === String(guestId))
     if (!guest) return
     setParsedTables((prev) =>
       prev
         ? prev.map((t) =>
             t.table === tableName
-              ? t.guestObjects.some((g) => g.id === guestId)
+              ? t.guestObjects.some((g) => String(g.id) === String(guestId))
                 ? t
                 : { ...t, guestObjects: [...t.guestObjects, guest] }
               : t,
