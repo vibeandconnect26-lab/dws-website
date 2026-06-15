@@ -1,15 +1,17 @@
 "use server"
 
 import { sql } from "@/lib/db"
-import { type EventInfo, type EventDraft, emptyEventInfo, type Guest } from "@/lib/questions"
+import { type EventInfo, type EventDraft, emptyEventInfo, type Guest, type PoolContact } from "@/lib/questions"
 import {
   sendCancellationReceipt,
   sendConfirmationReceipt,
   sendDinnerCancelled,
   sendDinnerDetails,
   sendFeedbackRequest,
+  sendNotSelectedNotice,
   sendSystemErrorNotice,
 } from "@/lib/email"
+import { savePoolContactFromGuest } from "@/app/actions/pool"
 import { normalizePhone, sendConfirmationSms, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
@@ -422,6 +424,45 @@ export async function cancelDinnerForGuests(
 
   revalidatePath("/")
   return { sent, failed, cancelled, errors }
+}
+
+// Notifies a guest they weren't chosen for this dinner. Sends the "not selected"
+// email (with a homepage sign-up link for another dinner) and saves them into
+// the permanent contact pool so they're considered for future matching dinners.
+export async function notifyGuestNotSelected(
+  guestId: number,
+  eventId: number,
+): Promise<{ ok: boolean; pooled: boolean; contact?: PoolContact; alreadyPooled?: boolean; error?: string }> {
+  const event = await getEvent(eventId)
+  if (!event) return { ok: false, pooled: false, error: "That dinner no longer exists." }
+
+  const rows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)} FROM guests WHERE id = ${guestId}
+  `) as Guest[]
+  const guest = rows[0]
+  if (!guest) return { ok: false, pooled: false, error: "Guest not found." }
+
+  const emailResult = await sendNotSelectedNotice(guest, event)
+  if (!emailResult.ok) {
+    return { ok: false, pooled: false, error: emailResult.error || "Could not send the email." }
+  }
+
+  // Add them to the permanent pool for future dinners. A pool failure shouldn't
+  // fail the whole action since the guest was already notified.
+  let pooled = false
+  let contact: PoolContact | undefined
+  let alreadyPooled = false
+  try {
+    const poolResult = await savePoolContactFromGuest(guestId)
+    pooled = poolResult.ok
+    contact = poolResult.contact
+    alreadyPooled = poolResult.alreadySaved
+  } catch (e) {
+    console.log("[v0] notifyGuestNotSelected pool save failed:", e instanceof Error ? e.message : e)
+  }
+
+  revalidatePath("/")
+  return { ok: true, pooled, contact, alreadyPooled }
 }
 
 // Removes a guest from a sent table and returns them to the pending pool.

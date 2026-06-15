@@ -17,6 +17,7 @@ import {
   deleteGuest,
   duplicateEvent,
   moveGuestToEvent,
+  notifyGuestNotSelected,
   removeGuestFromTable,
   resendConfirmation,
   sendDinnerDetailsToTable,
@@ -46,6 +47,7 @@ import {
   Lock,
   Mail,
   MailCheck,
+  MailX,
   MapPin,
   MessageSquare,
   Pencil,
@@ -418,6 +420,28 @@ function EventDetail({
     if (result.ok) {
       setSavedGuestIds((prev) => new Set(prev).add(guest.id))
       if (result.contact && !result.alreadySaved) onPoolContactSaved(result.contact)
+    }
+  }
+
+  // "Not selected" notice: emails the guest that they weren't chosen for this
+  // dinner (with a sign-up link for another) and adds them to the pool. We
+  // track which guests have been notified plus any inline error per guest.
+  const [notifyingId, setNotifyingId] = useState<number | null>(null)
+  const [notifiedGuestIds, setNotifiedGuestIds] = useState<Set<number>>(new Set())
+  const [notifyError, setNotifyError] = useState<Record<number, string>>({})
+
+  const handleNotSelected = async (guest: Guest) => {
+    if (notifiedGuestIds.has(guest.id)) return
+    setNotifyingId(guest.id)
+    setNotifyError((prev) => ({ ...prev, [guest.id]: "" }))
+    const result = await notifyGuestNotSelected(guest.id, event.id)
+    setNotifyingId(null)
+    if (result.ok) {
+      setNotifiedGuestIds((prev) => new Set(prev).add(guest.id))
+      setSavedGuestIds((prev) => new Set(prev).add(guest.id))
+      if (result.contact && !result.alreadyPooled) onPoolContactSaved(result.contact)
+    } else {
+      setNotifyError((prev) => ({ ...prev, [guest.id]: result.error || "Could not send the email." }))
     }
   }
 
@@ -1228,6 +1252,31 @@ function EventDetail({
                 </div>
                 <div className="flex shrink-0 flex-col items-stretch gap-2">
                   {renderSaveToPool(g)}
+                  <button
+                    onClick={() => handleNotSelected(g)}
+                    disabled={notifiedGuestIds.has(g.id) || notifyingId === g.id}
+                    title={
+                      notifiedGuestIds.has(g.id)
+                        ? `${g.name} was notified they weren't selected`
+                        : `Email ${g.name} that they weren't selected for this dinner and add them to the pool`
+                    }
+                    className={cn(
+                      "inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] px-3 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-default",
+                      notifiedGuestIds.has(g.id)
+                        ? "border-border bg-secondary text-muted-foreground"
+                        : "border-input bg-card text-foreground hover:border-[var(--gold)]",
+                    )}
+                  >
+                    {notifyingId === g.id ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <MailX className="size-3.5" aria-hidden="true" />
+                    )}
+                    {notifiedGuestIds.has(g.id) ? "Notified" : "Not selected"}
+                  </button>
+                  {notifyError[g.id] && (
+                    <p className="max-w-[180px] text-[11px] text-destructive">{notifyError[g.id]}</p>
+                  )}
                   <button
                     onClick={() => handleDelete(g.id)}
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
