@@ -1,7 +1,7 @@
 "use server"
 
 import { sql } from "@/lib/db"
-import { type EventInfo, type EventDraft, emptyEventInfo, type Guest } from "@/lib/questions"
+import { type EventInfo, type EventDraft, emptyEventInfo, type Guest, type PoolContact } from "@/lib/questions"
 import {
   sendCancellationReceipt,
   sendConfirmationReceipt,
@@ -20,6 +20,14 @@ const GUEST_COLUMNS = `
   confirmed, confirmed_at, table_label,
   feedback_sent_at, feedback_rating, feedback_comment, feedback_submitted_at
 `
+
+// Profile fields shared between a guest and a pooled contact.
+const POOL_PROFILE_COLUMNS = `
+  name, email, phone, age_range, neighborhood, motivation,
+  talk_about, skip_topics, energy, surprise, hope
+`
+
+const POOL_COLUMNS = `id, source_guest_id, ${POOL_PROFILE_COLUMNS}, created_at`
 
 type EventRow = {
   id: number | string
@@ -271,6 +279,71 @@ export async function moveGuestToEvent(
         feedback_submitted_at = NULL
     WHERE id = ${guestId}
   `
+  revalidatePath("/")
+  return { ok: true }
+}
+
+// Every contact saved to the standing pool, newest first.
+export async function getPoolContacts(): Promise<PoolContact[]> {
+  const rows = await sql`
+    SELECT ${sql.unsafe(POOL_COLUMNS)}
+    FROM pool_contacts
+    ORDER BY created_at DESC NULLS LAST, id DESC
+  `
+  return rows as PoolContact[]
+}
+
+// Removes a guest from their dinner and saves their profile to the standing
+// pool of unassigned people. Returns the new pool contact so the UI can show
+// it immediately. The INSERT...SELECT copies the profile (jsonb included)
+// without re-serializing on the client.
+export async function moveGuestToPool(
+  guestId: number,
+): Promise<{ ok: boolean; contact?: PoolContact; error?: string }> {
+  const inserted = (await sql`
+    INSERT INTO pool_contacts
+      (source_guest_id, ${sql.unsafe(POOL_PROFILE_COLUMNS)})
+    SELECT id, ${sql.unsafe(POOL_PROFILE_COLUMNS)}
+    FROM guests
+    WHERE id = ${guestId}
+    RETURNING ${sql.unsafe(POOL_COLUMNS)}
+  `) as PoolContact[]
+
+  if (inserted.length === 0) return { ok: false, error: "Guest not found." }
+
+  await sql`DELETE FROM guests WHERE id = ${guestId}`
+  revalidatePath("/")
+  return { ok: true, contact: inserted[0] }
+}
+
+// Places a pooled contact into a dinner as a fresh pending guest, then removes
+// them from the pool.
+export async function assignPoolContactToEvent(
+  poolContactId: number,
+  targetEventId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const target = await getEvent(targetEventId)
+  if (!target) return { ok: false, error: "That dinner no longer exists." }
+
+  const inserted = (await sql`
+    INSERT INTO guests
+      (event_id, ${sql.unsafe(POOL_PROFILE_COLUMNS)})
+    SELECT ${targetEventId}, ${sql.unsafe(POOL_PROFILE_COLUMNS)}
+    FROM pool_contacts
+    WHERE id = ${poolContactId}
+    RETURNING id
+  `) as { id: number }[]
+
+  if (inserted.length === 0) return { ok: false, error: "Pool contact not found." }
+
+  await sql`DELETE FROM pool_contacts WHERE id = ${poolContactId}`
+  revalidatePath("/")
+  return { ok: true }
+}
+
+// Permanently removes a contact from the standing pool.
+export async function deletePoolContact(poolContactId: number): Promise<{ ok: boolean }> {
+  await sql`DELETE FROM pool_contacts WHERE id = ${poolContactId}`
   revalidatePath("/")
   return { ok: true }
 }
