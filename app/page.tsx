@@ -8,7 +8,6 @@ import {
   getCancelledGuests,
   getPoolContacts,
 } from "@/app/actions/event"
-import { getPoolContacts } from "@/app/actions/pool"
 
 export const dynamic = "force-dynamic"
 

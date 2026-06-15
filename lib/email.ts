@@ -344,7 +344,7 @@ function buildNotChosenHtml(guest: Guest, event: EventInfo) {
     </div>
 
     <div style="text-align: center; margin: 0 0 20px;">
-      <a href="${dinnersUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Choose another dinner</a>
+      <a href="${dinnersUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Choose another dinner</a>
     </div>
 
     <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">Can&apos;t wait to share a table with you soon!</p>
@@ -410,54 +410,6 @@ export async function sendDinnerCancelled(guest: Guest, event: EventInfo) {
       to: guest.email,
       subject: `Your dinner${event.restaurant ? ` at ${event.restaurant}` : ""} has been cancelled`,
       html: buildDinnerCancelledHtml(guest, event),
-    })
-    if (error) return { ok: false, error: error.message }
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." }
-  }
-}
-
-// Sent when a guest wasn't chosen for a particular dinner. It softens the news,
-// points them back to the homepage to sign up for a different dinner, and lets
-// them know they'll be kept in a pool for future dinners they'd be a match for.
-function buildNotSelectedHtml(guest: Guest, event: EventInfo) {
-  const firstName = guest.name?.split(" ")[0] || "friend"
-  const venue = event.restaurant ? ` at ${event.restaurant}` : ""
-  const dateLine = event.date ? ` on ${formatDate(event.date)}` : ""
-  const signupUrl = getBaseUrl()
-  return `
-  <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; background: #faf7f2; padding: 32px; border-radius: 16px; color: #2c2418;">
-    <h1 style="font-size: 24px; margin: 0 0 4px;">Thank you for your interest, ${firstName}</h1>
-    <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">We're so glad you wanted to join us${venue}${dateLine}. This particular dinner filled up, and we weren't able to offer you a seat at this one — but we'd genuinely love to share a table with you soon.</p>
-
-    <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; margin-bottom: 20px; font-family: Helvetica, Arial, sans-serif;">
-      <p style="font-size: 15px; color: #2c2418; margin: 0 0 12px; line-height: 1.6;">Good news: we've added you to our guest pool for upcoming dinners. When we plan a future table we think you'd be a great match for, you'll be among the first we reach out to — so you still get to experience it.</p>
-      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Don't want to wait? You're welcome to sign up for a different dinner that fits your schedule.</p>
-    </div>
-
-    <div style="text-align: center; margin: 0 0 20px;">
-      <a href="${signupUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Sign up for another dinner</a>
-    </div>
-
-    <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">Thank you for your patience and flexibility — we can't wait to host you.</p>
-    <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
-  </div>`
-}
-
-export async function sendNotSelectedNotice(guest: Guest, event: EventInfo) {
-  if (!resend) {
-    return { ok: false, error: "RESEND_API_KEY is not configured." as string }
-  }
-  if (!guest.email) {
-    return { ok: false, error: "Guest has no email address." }
-  }
-  try {
-    const { error } = await resend.emails.send({
-      from: FROM,
-      to: guest.email,
-      subject: "An update on your dinner request — and what's next",
-      html: buildNotSelectedHtml(guest, event),
     })
     if (error) return { ok: false, error: error.message }
     return { ok: true }
