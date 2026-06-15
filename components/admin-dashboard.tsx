@@ -662,10 +662,15 @@ function EventDetail({
     }
   }
 
-  // Mark a pending guest as unassigned: remove them from this dinner and save
-  // their profile to the standing pool so they can be placed into a dinner later.
+  // Mark a pending guest as "not chosen": remove them from this dinner, save
+  // their profile to the standing pool, and email them a link to pick another
+  // dinner. We confirm first because it sends a real email to the guest.
   const [poolingGuestId, setPoolingGuestId] = useState<number | null>(null)
   const handleMoveToPool = async (guest: Guest) => {
+    const confirmed = window.confirm(
+      `Mark ${guest.name} as not chosen?\n\nThey'll be removed from this dinner, saved to your pool, and emailed a note with a link to choose another dinner.`,
+    )
+    if (!confirmed) return
     setPoolingGuestId(guest.id)
     setMoveError((prev) => ({ ...prev, [guest.id]: "" }))
     const result = await moveGuestToPool(guest.id)
@@ -675,6 +680,11 @@ function EventDetail({
       setConfirmedGuests((prev) => prev.filter((g) => g.id !== guest.id))
       setCancelledGuests((prev) => prev.filter((g) => g.id !== guest.id))
       onMovedToPool(result.contact)
+      if (result.emailError) {
+        window.alert(
+          `${guest.name} was moved to the pool, but the email could not be sent: ${result.emailError}`,
+        )
+      }
     } else {
       setMoveError((prev) => ({ ...prev, [guest.id]: result.error || "Could not move guest to the pool." }))
     }
@@ -982,7 +992,7 @@ function EventDetail({
                   <button
                     onClick={() => handleMoveToPool(g)}
                     disabled={poolingGuestId === g.id}
-                    title={`Move ${g.name} to the unassigned pool`}
+                    title={`Mark ${g.name} as not chosen — emails them and moves them to your pool`}
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
                   >
                     {poolingGuestId === g.id ? (
@@ -990,7 +1000,7 @@ function EventDetail({
                     ) : (
                       <Users className="size-3.5" aria-hidden="true" />
                     )}
-                    Move to pool
+                    Mark not chosen
                   </button>
                   {otherEvents.length > 0 && (
                     <div className="flex flex-col gap-1.5">
@@ -1701,8 +1711,9 @@ function PoolTab({
     <>
       <h2 className="mb-1.5 font-serif text-3xl text-foreground">Guest Pool</h2>
       <p className="mb-6 max-w-2xl text-sm text-muted-foreground">
-        People you&apos;ve set aside from a dinner&apos;s pending list. They&apos;re not attached to any dinner until
-        you place them into one — pick a dinner below and they&apos;ll join it as a fresh pending guest.
+        People you marked as &quot;not chosen&quot; for a dinner. Each was emailed a note with a link to pick another
+        night, and they&apos;re held here until you place them into a dinner — choose one below and they&apos;ll
+        join it as a fresh pending guest.
       </p>
 
       {poolContacts.length === 0 ? (
@@ -1710,7 +1721,8 @@ function PoolTab({
           <Users className="mx-auto mb-3 size-7 text-muted-foreground" aria-hidden="true" />
           <p className="font-medium text-foreground">Your pool is empty</p>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            Open a dinner, then use &quot;Move to pool&quot; on a pending guest to set them aside here.
+            Open a dinner, then use &quot;Mark not chosen&quot; on a pending guest to email them and set them aside
+            here.
           </p>
         </div>
       ) : (

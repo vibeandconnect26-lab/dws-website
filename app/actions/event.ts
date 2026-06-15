@@ -8,6 +8,7 @@ import {
   sendDinnerCancelled,
   sendDinnerDetails,
   sendFeedbackRequest,
+  sendNotChosenNotice,
   sendSystemErrorNotice,
 } from "@/lib/email"
 import { normalizePhone, sendReminderSms } from "@/lib/sms"
@@ -293,13 +294,25 @@ export async function getPoolContacts(): Promise<PoolContact[]> {
   return rows as PoolContact[]
 }
 
-// Removes a guest from their dinner and saves their profile to the standing
-// pool of unassigned people. Returns the new pool contact so the UI can show
-// it immediately. The INSERT...SELECT copies the profile (jsonb included)
-// without re-serializing on the client.
+// Marks a guest as "not chosen": removes them from their dinner, saves their
+// profile to the standing pool of unassigned people, and emails them a warm
+// note with a link back to the dinners page so they can pick another night.
+// Set `notify` to false to move silently without emailing.
+// The INSERT...SELECT copies the profile (jsonb included) without
+// re-serializing on the client.
 export async function moveGuestToPool(
   guestId: number,
-): Promise<{ ok: boolean; contact?: PoolContact; error?: string }> {
+  notify = true,
+): Promise<{ ok: boolean; contact?: PoolContact; emailSent?: boolean; emailError?: string; error?: string }> {
+  // Load the full guest (and their dinner) up front so we can personalize the
+  // "not chosen" email before the row is deleted.
+  const guestRows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)} FROM guests WHERE id = ${guestId}
+  `) as Guest[]
+  if (guestRows.length === 0) return { ok: false, error: "Guest not found." }
+  const guest = guestRows[0]
+  const event = guest.event_id != null ? await getEvent(guest.event_id) : null
+
   const inserted = (await sql`
     INSERT INTO pool_contacts
       (source_guest_id, ${sql.unsafe(POOL_PROFILE_COLUMNS)})
@@ -312,8 +325,19 @@ export async function moveGuestToPool(
   if (inserted.length === 0) return { ok: false, error: "Guest not found." }
 
   await sql`DELETE FROM guests WHERE id = ${guestId}`
+
+  // Email the guest that they weren't chosen, with a link to pick another
+  // dinner. A failed email never blocks the move — we just report it back.
+  let emailSent = false
+  let emailError: string | undefined
+  if (notify && event && guest.email) {
+    const res = await sendNotChosenNotice(guest, event)
+    emailSent = res.ok
+    if (!res.ok) emailError = res.error
+  }
+
   revalidatePath("/")
-  return { ok: true, contact: inserted[0] }
+  return { ok: true, contact: inserted[0], emailSent, emailError }
 }
 
 // Places a pooled contact into a dinner as a fresh pending guest, then removes
