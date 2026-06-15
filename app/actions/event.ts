@@ -11,7 +11,7 @@ import {
   sendNotChosenNotice,
   sendSystemErrorNotice,
 } from "@/lib/email"
-import { normalizePhone, sendReminderSms } from "@/lib/sms"
+import { normalizePhone, sendChosenSms, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
 const GUEST_COLUMNS = `
@@ -384,14 +384,16 @@ export async function sendDinnerDetailsToTable(
 ): Promise<{
   sent: number
   failed: number
+  textsSent: number
+  textsFailed: number
   errors: string[]
 }> {
   const event = await getEvent(eventId)
   if (!event || !event.restaurant) {
-    return { sent: 0, failed: 0, errors: ["Add event details before sending."] }
+    return { sent: 0, failed: 0, textsSent: 0, textsFailed: 0, errors: ["Add event details before sending."] }
   }
   if (!guestIds || guestIds.length === 0) {
-    return { sent: 0, failed: 0, errors: ["No guests at this table."] }
+    return { sent: 0, failed: 0, textsSent: 0, textsFailed: 0, errors: ["No guests at this table."] }
   }
 
   const rows = (await sql`
@@ -403,6 +405,8 @@ export async function sendDinnerDetailsToTable(
 
   let sent = 0
   let failed = 0
+  let textsSent = 0
+  let textsFailed = 0
   const errors: string[] = []
 
   for (const [seatIndex, guest] of rows.entries()) {
@@ -413,6 +417,15 @@ export async function sendDinnerDetailsToTable(
         UPDATE guests SET details_sent_at = now(), table_label = ${tableLabel}
         WHERE id = ${guest.id}
       `
+      // Also text the guest the essentials. A missing/invalid number or SMS
+      // failure never blocks the email confirmation — we just tally it.
+      const smsResult = await sendChosenSms(guest, event)
+      if (smsResult.ok) {
+        textsSent++
+      } else {
+        textsFailed++
+        if (smsResult.error && !errors.includes(smsResult.error)) errors.push(smsResult.error)
+      }
     } else {
       failed++
       if (result.error && !errors.includes(result.error)) errors.push(result.error)
@@ -420,7 +433,7 @@ export async function sendDinnerDetailsToTable(
   }
 
   revalidatePath("/")
-  return { sent, failed, errors }
+  return { sent, failed, textsSent, textsFailed, errors }
 }
 
 // Re-sends the dinner details / confirmation email to guests who were already
