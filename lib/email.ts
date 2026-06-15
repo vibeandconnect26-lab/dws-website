@@ -324,6 +324,54 @@ export async function sendCancellationReceipt(guest: Guest, event: EventInfo) {
   }
 }
 
+// Sent when a host marks a guest as "not chosen" for a dinner they signed up
+// for. It lets the guest down gently and points them back to the dinners page
+// so they can choose another night.
+function buildNotChosenHtml(guest: Guest, event: EventInfo) {
+  const firstName = guest.name?.split(" ")[0] || "friend"
+  const venue = event.restaurant ? ` at ${event.restaurant}` : ""
+  const dateLine = event.date ? `${formatDate(event.date)}${event.time ? ` at ${formatTime(event.time)}` : ""}` : ""
+  const dinnersUrl = getBaseUrl()
+  return `
+  <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; background: #faf7f2; padding: 32px; border-radius: 16px; color: #2c2418;">
+    <h1 style="font-size: 24px; margin: 0 0 4px;">Thank you for your interest, ${firstName}</h1>
+    <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">Thank you so much for signing up for the dinner${venue}${dateLine ? ` on ${dateLine}` : ""}. We had more wonderful people request a seat than we could fit at this particular table, so we weren&apos;t able to include you this time.</p>
+
+    <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; margin-bottom: 20px; font-family: Helvetica, Arial, sans-serif;">
+      <p style="font-size: 15px; color: #2c2418; margin: 0 0 12px; line-height: 1.6;">Please don&apos;t be discouraged — this isn&apos;t a no, just a not-this-table. We carefully curate each dinner to bring the right mix of people together, and we&apos;d genuinely love to seat you at an upcoming one.</p>
+      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Browse our other dinners and grab a spot at whichever night feels right for you.</p>
+    </div>
+
+    <div style="text-align: center; margin: 0 0 20px;">
+      <a href="${dinnersUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Choose another dinner</a>
+    </div>
+
+    <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">We hope to share a table with you soon.</p>
+    <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
+  </div>`
+}
+
+export async function sendNotChosenNotice(guest: Guest, event: EventInfo) {
+  if (!resend) {
+    return { ok: false, error: "RESEND_API_KEY is not configured." as string }
+  }
+  if (!guest.email) {
+    return { ok: false, error: "Guest has no email address." }
+  }
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: guest.email,
+      subject: `An update on your dinner request${event.restaurant ? ` — ${event.restaurant}` : ""}`,
+      html: buildNotChosenHtml(guest, event),
+    })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." }
+  }
+}
+
 function buildDinnerCancelledHtml(guest: Guest, event: EventInfo) {
   const firstName = guest.name?.split(" ")[0] || "friend"
   const venue = event.restaurant ? ` at ${event.restaurant}` : ""
