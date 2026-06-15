@@ -96,10 +96,9 @@ export function ConfirmView({
         <Image
           src="/vibe-connect-logo.png"
           alt="Vibe & Connect"
-          width={220}
+          width={56}
           height={56}
-          className="h-14 w-auto object-contain"
-          style={{ width: "auto", height: "3.5rem" }}
+          className="h-14 w-14 object-contain"
           priority
         />
       </header>
