@@ -10,7 +10,7 @@ import {
   sendFeedbackRequest,
   sendSystemErrorNotice,
 } from "@/lib/email"
-import { normalizePhone, sendReminderSms } from "@/lib/sms"
+import { normalizePhone, sendConfirmationSms, sendReminderSms } from "@/lib/sms"
 import { revalidatePath } from "next/cache"
 
 const GUEST_COLUMNS = `
@@ -505,6 +505,10 @@ export async function confirmByToken(
   if (event) {
     const result = await sendConfirmationReceipt(rows[0], event)
     if (!result.ok && result.error) console.log("[v0] confirmation receipt failed:", result.error)
+    // Also fire a brief confirmation text pointing them to their email. SMS
+    // failures (no Twilio config, no/invalid phone) shouldn't block confirming.
+    const smsResult = await sendConfirmationSms(rows[0], event)
+    if (!smsResult.ok && smsResult.error) console.log("[v0] confirmation SMS failed:", smsResult.error)
   }
 
   return { ok: true, alreadyConfirmed: false, cancelled: false }
@@ -536,6 +540,10 @@ export async function confirmGuestManually(
   if (event) {
     const result = await sendConfirmationReceipt(rows[0], event)
     if (!result.ok && result.error) console.log("[v0] manual confirmation receipt failed:", result.error)
+    // Same confirmation text as the self-serve flow, so manually-confirmed
+    // guests get an identical experience. SMS failures don't block confirming.
+    const smsResult = await sendConfirmationSms(rows[0], event)
+    if (!smsResult.ok && smsResult.error) console.log("[v0] manual confirmation SMS failed:", smsResult.error)
   }
 
   return { ok: true, alreadyConfirmed: false, cancelled: false }
