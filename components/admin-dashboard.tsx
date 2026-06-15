@@ -1,6 +1,17 @@
 "use client"
 
 import { useMemo, useState } from "react"
+<<<<<<< HEAD
+import {
+  questions,
+  type EventInfo,
+  type EventDraft,
+  type Guest,
+  type TableGroup,
+  type PoolContact,
+} from "@/lib/questions"
+=======
+>>>>>>> origin/main
 import {
   questions,
   type EventInfo,
@@ -10,14 +21,20 @@ import {
   type PoolContact,
 } from "@/lib/questions"
 import {
+  assignPoolContactToEvent,
   cancelDinnerForGuests,
   confirmGuestManually,
   createEvent,
   deleteEvent,
   deleteGuest,
+  deletePoolContact,
   duplicateEvent,
   moveGuestToEvent,
+<<<<<<< HEAD
   notifyGuestNotSelected,
+=======
+  moveGuestToPool,
+>>>>>>> origin/main
   removeGuestFromTable,
   resendConfirmation,
   sendDinnerDetailsToTable,
@@ -56,6 +73,10 @@ import {
   Star,
   Trash2,
   Unlock,
+<<<<<<< HEAD
+=======
+  UserPlus,
+>>>>>>> origin/main
   Users,
   X,
   XCircle,
@@ -86,7 +107,11 @@ export function AdminDashboard({
   events: initialEvents,
   counts: initialCounts,
   guestsByEvent,
+<<<<<<< HEAD
   poolContacts: initialPool,
+=======
+  poolContacts: initialPoolContacts,
+>>>>>>> origin/main
 }: {
   events: EventInfo[]
   counts: Counts
@@ -95,10 +120,12 @@ export function AdminDashboard({
 }) {
   const [events, setEvents] = useState(initialEvents)
   const [counts] = useState(initialCounts)
+  const [poolContacts, setPoolContacts] = useState(initialPoolContacts)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
   const [savingEvent, setSavingEvent] = useState(false)
   const [busyEventId, setBusyEventId] = useState<number | null>(null)
+<<<<<<< HEAD
   const [adminTab, setAdminTab] = useState<"dinners" | "reviews" | "pool">("dinners")
 
   // The permanent pool of saved contacts, shared across the Pool tab and the
@@ -108,6 +135,9 @@ export function AdminDashboard({
     setPoolContacts((prev) => (prev.some((p) => p.id === c.id) ? prev : [c, ...prev]))
   const removePoolContacts = (ids: number[]) =>
     setPoolContacts((prev) => prev.filter((p) => !ids.includes(p.id)))
+=======
+  const [adminTab, setAdminTab] = useState<"dinners" | "pool" | "reviews">("dinners")
+>>>>>>> origin/main
 
   // Overall average rating across every event, for the Reviews tab badge.
   const reviewStats = useMemo(() => {
@@ -178,6 +208,7 @@ export function AdminDashboard({
         onPoolContactsImported={removePoolContacts}
         onBack={() => setSelectedId(null)}
         onEdited={(updated) => setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))}
+        onMovedToPool={(contact) => setPoolContacts((prev) => [contact, ...prev])}
       />
     )
   }
@@ -195,6 +226,28 @@ export function AdminDashboard({
           )}
         >
           Dinners
+        </button>
+        <button
+          onClick={() => setAdminTab("pool")}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            adminTab === "pool"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Users className="size-3.5" aria-hidden="true" />
+          Pool
+          {poolContacts.length > 0 && (
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+                adminTab === "pool" ? "bg-primary-foreground/20" : "bg-secondary text-[var(--gold-dark)]",
+              )}
+            >
+              {poolContacts.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setAdminTab("reviews")}
@@ -248,10 +301,14 @@ export function AdminDashboard({
           <ReviewsTab events={events} guestsByEvent={guestsByEvent} />
         </>
       ) : adminTab === "pool" ? (
+<<<<<<< HEAD
         <>
           <h2 className="mb-6 font-serif text-3xl text-foreground">Contact Pool</h2>
           <PoolTab contacts={poolContacts} onDelete={(id) => removePoolContacts([id])} />
         </>
+=======
+        <PoolTab events={events} poolContacts={poolContacts} onChange={setPoolContacts} />
+>>>>>>> origin/main
       ) : (
         <>
           <div className="mb-6 flex items-center justify-between gap-4">
@@ -386,6 +443,7 @@ function EventDetail({
   onPoolContactsImported,
   onBack,
   onEdited,
+  onMovedToPool,
 }: {
   event: EventInfo
   allEvents: EventInfo[]
@@ -397,6 +455,7 @@ function EventDetail({
   onPoolContactsImported: (ids: number[]) => void
   onBack: () => void
   onEdited: (event: EventInfo) => void
+  onMovedToPool: (contact: PoolContact) => void
 }) {
   const [event, setEvent] = useState(initialEvent)
   const [editing, setEditing] = useState(false)
@@ -522,7 +581,7 @@ function EventDetail({
 
   const [sendingTable, setSendingTable] = useState<string | null>(null)
   const [tableResults, setTableResults] = useState<
-    Record<string, { sent: number; failed: number; errors: string[] }>
+    Record<string, { sent: number; failed: number; textsSent?: number; textsFailed?: number; errors: string[] }>
   >({})
 
   // Manual grouping: which guest is being dragged, and the table they came from.
@@ -836,6 +895,34 @@ function EventDetail({
       })
     } else {
       setMoveError((prev) => ({ ...prev, [guest.id]: result.error || "Could not move guest." }))
+    }
+  }
+
+  // Mark a pending guest as "not chosen": remove them from this dinner, save
+  // their profile to the standing pool, and email them a link to pick another
+  // dinner. We confirm first because it sends a real email to the guest.
+  const [poolingGuestId, setPoolingGuestId] = useState<number | null>(null)
+  const handleMoveToPool = async (guest: Guest) => {
+    const confirmed = window.confirm(
+      `Mark ${guest.name} as not chosen?\n\nThey'll be removed from this dinner, saved to your pool, and emailed a note with a link to choose another dinner.`,
+    )
+    if (!confirmed) return
+    setPoolingGuestId(guest.id)
+    setMoveError((prev) => ({ ...prev, [guest.id]: "" }))
+    const result = await moveGuestToPool(guest.id)
+    setPoolingGuestId(null)
+    if (result.ok && result.contact) {
+      setGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setConfirmedGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      setCancelledGuests((prev) => prev.filter((g) => g.id !== guest.id))
+      onMovedToPool(result.contact)
+      if (result.emailError) {
+        window.alert(
+          `${guest.name} was moved to the pool, but the email could not be sent: ${result.emailError}`,
+        )
+      }
+    } else {
+      setMoveError((prev) => ({ ...prev, [guest.id]: result.error || "Could not move guest to the pool." }))
     }
   }
 
@@ -1284,6 +1371,19 @@ function EventDetail({
                     <Trash2 className="size-3.5" aria-hidden="true" />
                     Remove
                   </button>
+                  <button
+                    onClick={() => handleMoveToPool(g)}
+                    disabled={poolingGuestId === g.id}
+                    title={`Mark ${g.name} as not chosen — emails them and moves them to your pool`}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                  >
+                    {poolingGuestId === g.id ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Users className="size-3.5" aria-hidden="true" />
+                    )}
+                    Mark not chosen
+                  </button>
                   {otherEvents.length > 0 && (
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-1.5">
@@ -1567,8 +1667,10 @@ function EventDetail({
                       )}
                       {result && (
                         <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-foreground">
-                          {result.sent} sent
+                          {result.sent} email{result.sent === 1 ? "" : "s"} sent
                           {result.failed > 0 ? ` · ${result.failed} failed` : ""}
+                          {typeof result.textsSent === "number" ? ` · ${result.textsSent} text${result.textsSent === 1 ? "" : "s"} sent` : ""}
+                          {result.textsFailed ? ` · ${result.textsFailed} text${result.textsFailed === 1 ? "" : "s"} failed` : ""}
                           {result.errors.length > 0 ? ` — ${result.errors.join("; ")}` : ""}
                         </p>
                       )}
@@ -2048,6 +2150,146 @@ function Tag({ children }: { children: React.ReactNode }) {
     <span className="rounded-full bg-[var(--gold)]/12 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--gold-dark)]">
       {children}
     </span>
+  )
+}
+
+// The standing pool of unassigned guests. Hosts set people aside here from any
+// dinner's pending list, then place them into a dinner later via the dropdown.
+function PoolTab({
+  events,
+  poolContacts,
+  onChange,
+}: {
+  events: EventInfo[]
+  poolContacts: PoolContact[]
+  onChange: (next: PoolContact[]) => void
+}) {
+  const [assignSelection, setAssignSelection] = useState<Record<number, number | "">>({})
+  const [assigningId, setAssigningId] = useState<number | null>(null)
+  const [removingId, setRemovingId] = useState<number | null>(null)
+  const [error, setError] = useState<Record<number, string>>({})
+
+  const handleAssign = async (contact: PoolContact) => {
+    const targetId = assignSelection[contact.id]
+    if (!targetId) return
+    setAssigningId(contact.id)
+    setError((prev) => ({ ...prev, [contact.id]: "" }))
+    const result = await assignPoolContactToEvent(contact.id, Number(targetId))
+    setAssigningId(null)
+    if (result.ok) {
+      onChange(poolContacts.filter((c) => c.id !== contact.id))
+    } else {
+      setError((prev) => ({ ...prev, [contact.id]: result.error || "Could not add to dinner." }))
+    }
+  }
+
+  const handleRemove = async (contact: PoolContact) => {
+    if (!confirm(`Remove ${contact.name} from the pool? This cannot be undone.`)) return
+    setRemovingId(contact.id)
+    await deletePoolContact(contact.id)
+    setRemovingId(null)
+    onChange(poolContacts.filter((c) => c.id !== contact.id))
+  }
+
+  return (
+    <>
+      <h2 className="mb-1.5 font-serif text-3xl text-foreground">Guest Pool</h2>
+      <p className="mb-6 max-w-2xl text-sm text-muted-foreground">
+        People you marked as &quot;not chosen&quot; for a dinner. Each was emailed a note with a link to pick another
+        night, and they&apos;re held here until you place them into a dinner — choose one below and they&apos;ll
+        join it as a fresh pending guest.
+      </p>
+
+      {poolContacts.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
+          <Users className="mx-auto mb-3 size-7 text-muted-foreground" aria-hidden="true" />
+          <p className="font-medium text-foreground">Your pool is empty</p>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Open a dinner, then use &quot;Mark not chosen&quot; on a pending guest to email them and set them aside
+            here.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {poolContacts.map((c) => (
+            <div
+              key={c.id}
+              className="flex flex-col gap-4 rounded-xl border border-border bg-card px-6 py-5 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div className="flex-1">
+                <span className="text-base font-semibold text-foreground">{c.name}</span>
+                <div className="mb-1 mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                  <Mail className="size-3.5" aria-hidden="true" />
+                  <a href={`mailto:${c.email}`} className="hover:text-foreground hover:underline">
+                    {c.email}
+                  </a>
+                </div>
+                <div className="mb-2 text-[13px] text-muted-foreground">
+                  {[c.age_range, c.neighborhood, c.energy?.split("—")[0].trim()].filter(Boolean).join(" · ")}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(c.talk_about || []).map((t) => (
+                    <Tag key={t}>{t}</Tag>
+                  ))}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col items-stretch gap-2 sm:w-64">
+                <div className="flex items-center gap-1.5">
+                  <label className="sr-only" htmlFor={`assign-${c.id}`}>
+                    Add {c.name} to a dinner
+                  </label>
+                  <select
+                    id={`assign-${c.id}`}
+                    value={assignSelection[c.id] ?? ""}
+                    onChange={(e) =>
+                      setAssignSelection((prev) => ({
+                        ...prev,
+                        [c.id]: e.target.value ? Number(e.target.value) : "",
+                      }))
+                    }
+                    className="min-w-0 flex-1 rounded-lg border-[1.5px] border-input bg-card px-2.5 py-1.5 text-[13px] outline-none transition-colors focus:border-[var(--gold)]"
+                  >
+                    <option value="">Add to dinner…</option>
+                    {events.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.restaurant || "Untitled Dinner"}
+                        {e.date ? ` · ${formatDate(e.date)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleAssign(c)}
+                    disabled={!assignSelection[c.id] || assigningId === c.id}
+                    title={`Add ${c.name} to the selected dinner`}
+                    aria-label={`Add ${c.name} to the selected dinner`}
+                    className="inline-flex items-center justify-center rounded-lg bg-primary px-2.5 py-1.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    {assigningId === c.id ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <UserPlus className="size-3.5" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                <button
+                  onClick={() => handleRemove(c)}
+                  disabled={removingId === c.id}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-destructive/70 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                >
+                  {removingId === c.id ? (
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Trash2 className="size-3.5" aria-hidden="true" />
+                  )}
+                  Remove from pool
+                </button>
+                {error[c.id] && <p className="text-[12px] text-destructive">{error[c.id]}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 

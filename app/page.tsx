@@ -6,6 +6,7 @@ import {
   getGuests,
   getConfirmedGuests,
   getCancelledGuests,
+  getPoolContacts,
 } from "@/app/actions/event"
 import { getPoolContacts } from "@/app/actions/pool"
 

@@ -8,11 +8,18 @@ import {
   sendDinnerCancelled,
   sendDinnerDetails,
   sendFeedbackRequest,
+<<<<<<< HEAD
   sendNotSelectedNotice,
   sendSystemErrorNotice,
 } from "@/lib/email"
 import { savePoolContactFromGuest } from "@/app/actions/pool"
 import { normalizePhone, sendConfirmationSms, sendReminderSms } from "@/lib/sms"
+=======
+  sendNotChosenNotice,
+  sendSystemErrorNotice,
+} from "@/lib/email"
+import { normalizePhone, sendChosenSms, sendReminderSms } from "@/lib/sms"
+>>>>>>> origin/main
 import { revalidatePath } from "next/cache"
 
 const GUEST_COLUMNS = `
@@ -22,6 +29,14 @@ const GUEST_COLUMNS = `
   confirmed, confirmed_at, table_label,
   feedback_sent_at, feedback_rating, feedback_comment, feedback_submitted_at
 `
+
+// Profile fields shared between a guest and a pooled contact.
+const POOL_PROFILE_COLUMNS = `
+  name, email, phone, age_range, neighborhood, motivation,
+  talk_about, skip_topics, energy, surprise, hope
+`
+
+const POOL_COLUMNS = `id, source_guest_id, ${POOL_PROFILE_COLUMNS}, created_at`
 
 type EventRow = {
   id: number | string
@@ -277,6 +292,94 @@ export async function moveGuestToEvent(
   return { ok: true }
 }
 
+// Every contact saved to the standing pool, newest first.
+export async function getPoolContacts(): Promise<PoolContact[]> {
+  const rows = await sql`
+    SELECT ${sql.unsafe(POOL_COLUMNS)}
+    FROM pool_contacts
+    ORDER BY created_at DESC NULLS LAST, id DESC
+  `
+  return rows as PoolContact[]
+}
+
+// Marks a guest as "not chosen": removes them from their dinner, saves their
+// profile to the standing pool of unassigned people, and emails them a warm
+// note with a link back to the dinners page so they can pick another night.
+// Set `notify` to false to move silently without emailing.
+// The INSERT...SELECT copies the profile (jsonb included) without
+// re-serializing on the client.
+export async function moveGuestToPool(
+  guestId: number,
+  notify = true,
+): Promise<{ ok: boolean; contact?: PoolContact; emailSent?: boolean; emailError?: string; error?: string }> {
+  // Load the full guest (and their dinner) up front so we can personalize the
+  // "not chosen" email before the row is deleted.
+  const guestRows = (await sql`
+    SELECT ${sql.unsafe(GUEST_COLUMNS)} FROM guests WHERE id = ${guestId}
+  `) as Guest[]
+  if (guestRows.length === 0) return { ok: false, error: "Guest not found." }
+  const guest = guestRows[0]
+  const event = guest.event_id != null ? await getEvent(guest.event_id) : null
+
+  const inserted = (await sql`
+    INSERT INTO pool_contacts
+      (source_guest_id, ${sql.unsafe(POOL_PROFILE_COLUMNS)})
+    SELECT id, ${sql.unsafe(POOL_PROFILE_COLUMNS)}
+    FROM guests
+    WHERE id = ${guestId}
+    RETURNING ${sql.unsafe(POOL_COLUMNS)}
+  `) as PoolContact[]
+
+  if (inserted.length === 0) return { ok: false, error: "Guest not found." }
+
+  await sql`DELETE FROM guests WHERE id = ${guestId}`
+
+  // Email the guest that they weren't chosen, with a link to pick another
+  // dinner. A failed email never blocks the move — we just report it back.
+  let emailSent = false
+  let emailError: string | undefined
+  if (notify && event && guest.email) {
+    const res = await sendNotChosenNotice(guest, event)
+    emailSent = res.ok
+    if (!res.ok) emailError = res.error
+  }
+
+  revalidatePath("/")
+  return { ok: true, contact: inserted[0], emailSent, emailError }
+}
+
+// Places a pooled contact into a dinner as a fresh pending guest, then removes
+// them from the pool.
+export async function assignPoolContactToEvent(
+  poolContactId: number,
+  targetEventId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const target = await getEvent(targetEventId)
+  if (!target) return { ok: false, error: "That dinner no longer exists." }
+
+  const inserted = (await sql`
+    INSERT INTO guests
+      (event_id, ${sql.unsafe(POOL_PROFILE_COLUMNS)})
+    SELECT ${targetEventId}, ${sql.unsafe(POOL_PROFILE_COLUMNS)}
+    FROM pool_contacts
+    WHERE id = ${poolContactId}
+    RETURNING id
+  `) as { id: number }[]
+
+  if (inserted.length === 0) return { ok: false, error: "Pool contact not found." }
+
+  await sql`DELETE FROM pool_contacts WHERE id = ${poolContactId}`
+  revalidatePath("/")
+  return { ok: true }
+}
+
+// Permanently removes a contact from the standing pool.
+export async function deletePoolContact(poolContactId: number): Promise<{ ok: boolean }> {
+  await sql`DELETE FROM pool_contacts WHERE id = ${poolContactId}`
+  revalidatePath("/")
+  return { ok: true }
+}
+
 export async function verifyAdmin(password: string) {
   const expected = process.env.ADMIN_PASSWORD || "vibeadmin2025"
   return { ok: password === expected }
@@ -289,14 +392,16 @@ export async function sendDinnerDetailsToTable(
 ): Promise<{
   sent: number
   failed: number
+  textsSent: number
+  textsFailed: number
   errors: string[]
 }> {
   const event = await getEvent(eventId)
   if (!event || !event.restaurant) {
-    return { sent: 0, failed: 0, errors: ["Add event details before sending."] }
+    return { sent: 0, failed: 0, textsSent: 0, textsFailed: 0, errors: ["Add event details before sending."] }
   }
   if (!guestIds || guestIds.length === 0) {
-    return { sent: 0, failed: 0, errors: ["No guests at this table."] }
+    return { sent: 0, failed: 0, textsSent: 0, textsFailed: 0, errors: ["No guests at this table."] }
   }
 
   const rows = (await sql`
@@ -308,6 +413,8 @@ export async function sendDinnerDetailsToTable(
 
   let sent = 0
   let failed = 0
+  let textsSent = 0
+  let textsFailed = 0
   const errors: string[] = []
 
   for (const [seatIndex, guest] of rows.entries()) {
@@ -318,6 +425,15 @@ export async function sendDinnerDetailsToTable(
         UPDATE guests SET details_sent_at = now(), table_label = ${tableLabel}
         WHERE id = ${guest.id}
       `
+      // Also text the guest the essentials. A missing/invalid number or SMS
+      // failure never blocks the email confirmation — we just tally it.
+      const smsResult = await sendChosenSms(guest, event)
+      if (smsResult.ok) {
+        textsSent++
+      } else {
+        textsFailed++
+        if (smsResult.error && !errors.includes(smsResult.error)) errors.push(smsResult.error)
+      }
     } else {
       failed++
       if (result.error && !errors.includes(result.error)) errors.push(result.error)
@@ -325,7 +441,7 @@ export async function sendDinnerDetailsToTable(
   }
 
   revalidatePath("/")
-  return { sent, failed, errors }
+  return { sent, failed, textsSent, textsFailed, errors }
 }
 
 // Re-sends the dinner details / confirmation email to guests who were already
