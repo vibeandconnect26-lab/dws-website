@@ -818,6 +818,40 @@ function EventDetail({
     setDragOverTable(null)
   }
 
+  // Pool guests still available to drop into a generated table: pending guests
+  // (not yet emailed) who aren't already seated in any of the generated tables.
+  const seatedInParsed = useMemo(() => {
+    const ids = new Set<number>()
+    for (const t of parsedTables ?? []) for (const g of t.guestObjects) ids.add(g.id)
+    return ids
+  }, [parsedTables])
+  const poolForTables = useMemo(
+    () => unseatedGuests.filter((g) => !seatedInParsed.has(g.id)),
+    [unseatedGuests, seatedInParsed],
+  )
+
+  // Per-generated-table dropdown selection for adding a pool guest.
+  const [parsedAddSelection, setParsedAddSelection] = useState<Record<string, number | "">>({})
+
+  const addPoolGuestToParsedTable = (tableName: string) => {
+    const guestId = parsedAddSelection[tableName]
+    if (!guestId) return
+    const guest = poolForTables.find((g) => g.id === guestId)
+    if (!guest) return
+    setParsedTables((prev) =>
+      prev
+        ? prev.map((t) =>
+            t.table === tableName
+              ? t.guestObjects.some((g) => g.id === guestId)
+                ? t
+                : { ...t, guestObjects: [...t.guestObjects, guest] }
+              : t,
+          )
+        : prev,
+    )
+    setParsedAddSelection((prev) => ({ ...prev, [tableName]: "" }))
+  }
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
       <button
@@ -1166,7 +1200,7 @@ function EventDetail({
                       <p className="mb-3 text-[13px] text-muted-foreground">{table.why}</p>
                       {table.guestObjects.length === 0 ? (
                         <p className="rounded-lg border border-dashed border-border px-3 py-3 text-center text-[13px] text-muted-foreground">
-                          Empty table — drag guests here.
+                          Empty table — drag guests here or add one from the pool below.
                         </p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
@@ -1217,6 +1251,43 @@ function EventDetail({
                               </span>
                             )
                           })}
+                        </div>
+                      )}
+                      {!table.locked && poolForTables.length > 0 && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                          <label
+                            htmlFor={`pool-${table.table}`}
+                            className="text-[12px] font-medium text-muted-foreground"
+                          >
+                            Add from pool:
+                          </label>
+                          <select
+                            id={`pool-${table.table}`}
+                            value={parsedAddSelection[table.table] ?? ""}
+                            onChange={(e) =>
+                              setParsedAddSelection((prev) => ({
+                                ...prev,
+                                [table.table]: e.target.value ? Number(e.target.value) : "",
+                              }))
+                            }
+                            className="rounded-lg border-[1.5px] border-input bg-card px-2.5 py-1.5 text-[13px] text-foreground focus:border-[var(--gold)] focus:outline-none"
+                          >
+                            <option value="">Select a guest…</option>
+                            {poolForTables.map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {g.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => addPoolGuestToParsedTable(table.table)}
+                            disabled={!parsedAddSelection[table.table]}
+                            title={`Add the selected pool guest to ${table.table}`}
+                            className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[12px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                          >
+                            <Plus className="size-3.5" aria-hidden="true" />
+                            Add to {table.table}
+                          </button>
                         </div>
                       )}
                       {result && (
