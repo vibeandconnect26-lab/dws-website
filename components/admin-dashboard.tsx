@@ -401,7 +401,7 @@ function EventDetail({
 
   const [sendingTable, setSendingTable] = useState<string | null>(null)
   const [tableResults, setTableResults] = useState<
-    Record<string, { sent: number; failed: number; errors: string[] }>
+    Record<string, { sent: number; failed: number; textsSent?: number; textsFailed?: number; errors: string[] }>
   >({})
 
   // Manual grouping: which guest is being dragged, and the table they came from.
@@ -1248,8 +1248,10 @@ function EventDetail({
                       )}
                       {result && (
                         <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-foreground">
-                          {result.sent} sent
+                          {result.sent} email{result.sent === 1 ? "" : "s"} sent
                           {result.failed > 0 ? ` · ${result.failed} failed` : ""}
+                          {typeof result.textsSent === "number" ? ` · ${result.textsSent} text${result.textsSent === 1 ? "" : "s"} sent` : ""}
+                          {result.textsFailed ? ` · ${result.textsFailed} text${result.textsFailed === 1 ? "" : "s"} failed` : ""}
                           {result.errors.length > 0 ? ` — ${result.errors.join("; ")}` : ""}
                         </p>
                       )}

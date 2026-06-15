@@ -32,6 +32,37 @@ function formatTime(time: string) {
   return parsed.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
 }
 
+// Sent the moment a guest is chosen for a dinner, alongside the details email.
+// Keeps the essentials (date, time, place) in the text and points them to email
+// for everything else (confirm link, seat prompts, address details).
+export function buildChosenMessage(guest: Guest, event: EventInfo) {
+  const firstName = guest.name?.split(" ")[0] || "there"
+  const timeStr = formatTime(event.time)
+  const dateStr = formatDate(event.date)
+  const where = event.restaurant || "your dinner"
+  return `Hi ${firstName}! Great news from Vibe & Connect — you've got a seat at our Dinner with Strangers on ${dateStr} at ${timeStr}, at ${where}. Check your email for full details and to confirm your spot. This number is not monitored, so please do not reply.`
+}
+
+export async function sendChosenSms(guest: Guest, event: EventInfo) {
+  if (!client || !fromNumber) {
+    return { ok: false, error: "Twilio is not configured (set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER)." }
+  }
+  const to = normalizePhone(guest.phone)
+  if (!to) {
+    return { ok: false, error: `${guest.name || "Guest"} has no valid mobile number.` }
+  }
+  try {
+    await client.messages.create({
+      from: fromNumber,
+      to,
+      body: buildChosenMessage(guest, event),
+    })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send text." }
+  }
+}
+
 export function buildReminderMessage(guest: Guest, event: EventInfo) {
   const firstName = guest.name?.split(" ")[0] || "there"
   const timeStr = formatTime(event.time)
