@@ -463,6 +463,43 @@ function EventDetail({
     )
   }
 
+  // Move a guest from the pending pool into an already-generated table. Reuses
+  // the same "send dinner details" action that seats guests, so the picked
+  // guest gets their table email and drops out of the pool. Keyed per table.
+  const [addSelection, setAddSelection] = useState<Record<string, number | "">>({})
+  const [addingToTable, setAddingToTable] = useState<string | null>(null)
+  const [addNotice, setAddNotice] = useState<Record<string, string>>({})
+
+  const handleAddToTable = async (tableLabel: string) => {
+    const guestId = addSelection[tableLabel]
+    if (!guestId) return
+    const guest = unseatedGuests.find((g) => g.id === guestId)
+    if (!guest) return
+    setAddingToTable(tableLabel)
+    setAddNotice((prev) => ({ ...prev, [tableLabel]: "" }))
+    const result = await sendDinnerDetailsToTable([guest.id], tableLabel, event.id)
+    setAddingToTable(null)
+    if (result.sent > 0) {
+      setGuests((prev) =>
+        prev.map((g) =>
+          g.id === guest.id
+            ? { ...g, details_sent_at: new Date().toISOString(), table_label: tableLabel }
+            : g,
+        ),
+      )
+      setAddSelection((prev) => ({ ...prev, [tableLabel]: "" }))
+      setAddNotice((prev) => ({
+        ...prev,
+        [tableLabel]: `${guest.name} was added to ${tableLabel} and emailed their details.`,
+      }))
+    } else {
+      setAddNotice((prev) => ({
+        ...prev,
+        [tableLabel]: result.errors[0] || "Could not add the guest. Try again.",
+      }))
+    }
+  }
+
   const handleResendConfirmation = async (label: string, tableGuests: Guest[]) => {
     setResendingTable(label)
     setResendNotice((prev) => ({ ...prev, [label]: "" }))
@@ -1352,6 +1389,52 @@ function EventDetail({
                       )
                     })}
                   </div>
+                  {unseatedGuests.length > 0 && (
+                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                      <label htmlFor={`add-${t.label}`} className="text-[12px] font-medium text-muted-foreground">
+                        Add from pool:
+                      </label>
+                      <select
+                        id={`add-${t.label}`}
+                        value={addSelection[t.label] ?? ""}
+                        onChange={(e) =>
+                          setAddSelection((prev) => ({
+                            ...prev,
+                            [t.label]: e.target.value ? Number(e.target.value) : "",
+                          }))
+                        }
+                        className="rounded-lg border-[1.5px] border-input bg-card px-2.5 py-1.5 text-[13px] text-foreground focus:border-[var(--gold)] focus:outline-none"
+                      >
+                        <option value="">Select a guest…</option>
+                        {unseatedGuests.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => handleAddToTable(t.label)}
+                        disabled={!addSelection[t.label] || addingToTable === t.label}
+                        title={`Add the selected guest to ${t.label} and email their dinner details`}
+                        className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[12px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                      >
+                        {addingToTable === t.label ? (
+                          <>
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                            Adding...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="size-3.5" aria-hidden="true" />
+                            Add to {t.label}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                  {addNotice[t.label] && (
+                    <p className="mt-3 text-[12px] text-muted-foreground">{addNotice[t.label]}</p>
+                  )}
                   {removeNotice[t.label] && (
                     <p className="mt-3 text-[12px] text-muted-foreground">{removeNotice[t.label]}</p>
                   )}
