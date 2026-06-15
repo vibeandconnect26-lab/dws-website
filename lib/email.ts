@@ -116,7 +116,7 @@ function buildHtml(guest: Guest, event: EventInfo, prompts: string[] = []) {
         <tr><td style="padding: 0 0 16px; font-size: 17px; font-weight: 600;">${event.restaurant || "TBA"}</td></tr>
         ${
           event.address
-            ? `<tr><td style="padding: 0 0 16px; font-size: 14px; color: #6b6253;">${event.address}${mapsUrl ? ` &middot; <a href="${mapsUrl}" style="color: #b08d3a;">View map</a>` : ""}</td></tr>`
+            ? `<tr><td style="padding: 0 0 16px; font-size: 14px; color: #6b6253;">${event.address}${mapsUrl ? ` &middot; <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="color: #b08d3a;">View map</a>` : ""}</td></tr>`
             : ""
         }
         <tr><td style="padding: 8px 0; color: #9b9280; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Date &amp; Time</td></tr>
@@ -139,8 +139,8 @@ function buildHtml(guest: Guest, event: EventInfo, prompts: string[] = []) {
     <div style="background: #fff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; text-align: center; font-family: Helvetica, Arial, sans-serif;">
       <p style="font-size: 15px; color: #2c2418; margin: 0 0 16px; font-weight: 600;">Please let us know if you can make it.</p>
       <p style="font-size: 13px; color: #6b6253; margin: 0 0 16px;">Confirming locks in your seat. If you can't make it, cancel so we can offer your spot to someone else.</p>
-      <a href="${confirmUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; margin: 0 6px 10px;">Confirm my spot</a>
-      <a href="${cancelUrl}" style="display: inline-block; padding: 12px 28px; background: #faf7f2; color: #2c2418; text-decoration: none; border: 1px solid #d8cfbf; border-radius: 8px; font-size: 15px; font-weight: 600; margin: 0 6px 10px;">Cancel my spot</a>
+      <a href="${confirmUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; margin: 0 6px 10px;">Confirm my spot</a>
+      <a href="${cancelUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 28px; background: #faf7f2; color: #2c2418; text-decoration: none; border: 1px solid #d8cfbf; border-radius: 8px; font-size: 15px; font-weight: 600; margin: 0 6px 10px;">Cancel my spot</a>
     </div>
 
     <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
@@ -156,7 +156,7 @@ function buildFeedbackHtml(guest: Guest, event: EventInfo) {
   const stars = [1, 2, 3, 4, 5]
     .map(
       (n) =>
-        `<a href="${feedbackBase}?rating=${n}" style="text-decoration: none; font-size: 40px; line-height: 1; color: #d4af37; margin: 0 3px; font-family: Arial, sans-serif;" aria-label="${n} star${n === 1 ? "" : "s"}">&#9733;</a>`,
+        `<a href="${feedbackBase}?rating=${n}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; font-size: 40px; line-height: 1; color: #d4af37; margin: 0 3px; font-family: Arial, sans-serif;" aria-label="${n} star${n === 1 ? "" : "s"}">&#9733;</a>`,
     )
     .join("")
 
@@ -172,7 +172,7 @@ function buildFeedbackHtml(guest: Guest, event: EventInfo) {
     </div>
 
     <div style="text-align: center;">
-      <a href="${feedbackBase}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Leave a review</a>
+      <a href="${feedbackBase}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Leave a review</a>
     </div>
 
     <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
@@ -251,7 +251,8 @@ function buildConfirmationReceiptHtml(guest: Guest, event: EventInfo) {
     <p style="font-size: 15px; color: #6b6253; margin: 0 0 20px; line-height: 1.6;">Thank you for confirming. Your seat${venue}${dateLine ? ` on ${dateLine}` : ""} is locked in, and we can't wait to host you.</p>
 
     <div style="background: #ffffff; border: 1px solid #e8e1d4; border-radius: 12px; padding: 24px; font-family: Helvetica, Arial, sans-serif;">
-      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Keep an eye on your inbox for any last details before the dinner. If your plans change, just reply to this email and let us know.</p>
+      <p style="font-size: 14px; color: #6b6253; margin: 0 0 12px; line-height: 1.6;">Keep an eye on your inbox for any last details before the dinner. If your plans change, just reply to this email and let us know.</p>
+      <p style="font-size: 14px; color: #6b6253; margin: 0; line-height: 1.6;">Have questions or concerns? <a href="mailto:admin@vibeandconnect.org?subject=Question%20about%20my%20dinner%20reservation" style="color: #2c2418; font-weight: 600;">Email our team</a> and we'll be happy to help.</p>
     </div>
 
     <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
@@ -296,7 +297,7 @@ function buildCancellationReceiptHtml(guest: Guest, event: EventInfo) {
     </div>
 
     <div style="text-align: center; margin: 0 0 20px;">
-      <a href="${upcomingUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">See upcoming dinners</a>
+      <a href="${upcomingUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">See upcoming dinners</a>
     </div>
 
     <p style="font-size: 12px; color: #9b9280; text-align: center; margin: 24px 0 0; font-family: Helvetica, Arial, sans-serif;">Vibe &amp; Connect &middot; Columbia, SC</p>
@@ -343,7 +344,7 @@ function buildNotChosenHtml(guest: Guest, event: EventInfo) {
     </div>
 
     <div style="text-align: center; margin: 0 0 20px;">
-      <a href="${dinnersUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Choose another dinner</a>
+      <a href="${dinnersUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">Choose another dinner</a>
     </div>
 
     <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">Can&apos;t wait to share a table with you soon!</p>
@@ -388,7 +389,7 @@ function buildDinnerCancelledHtml(guest: Guest, event: EventInfo) {
     </div>
 
     <div style="text-align: center; margin: 0 0 20px;">
-      <a href="${upcomingUrl}" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">See upcoming dinners</a>
+      <a href="${upcomingUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 28px; background: #2c2418; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: Helvetica, Arial, sans-serif;">See upcoming dinners</a>
     </div>
 
     <p style="font-size: 14px; color: #6b6253; margin: 0 0 4px; line-height: 1.6;">We truly hope to host you soon.</p>

@@ -122,14 +122,13 @@ export type Guest = {
   feedback_submitted_at: string | null
 }
 
-// A guest set aside into the standing pool of unassigned people. Mirrors the
-// guest profile fields (minus dinner-specific state) so they can be dropped
-// into any future dinner later.
+// A saved contact in the permanent pool. Mirrors the profile fields of a guest
+// (minus event-specific RSVP/seating state) so a contact can be imported into
+// any future dinner as a fresh guest.
 export type PoolContact = {
   id: number
-  source_guest_id: number | null
   name: string
-  email: string
+  email: string | null
   phone: string | null
   age_range: string | null
   neighborhood: string | null
@@ -139,6 +138,7 @@ export type PoolContact = {
   energy: string | null
   surprise: string | null
   hope: string | null
+  source_guest_id: number | null
   created_at: string
 }
 

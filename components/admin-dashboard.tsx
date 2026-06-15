@@ -12,6 +12,7 @@ import {
 import {
   assignPoolContactToEvent,
   cancelDinnerForGuests,
+  confirmGuestManually,
   createEvent,
   deleteEvent,
   deleteGuest,
@@ -486,6 +487,62 @@ function EventDetail({
   const [resendingTable, setResendingTable] = useState<string | null>(null)
   const [resendNotice, setResendNotice] = useState<Record<string, string>>({})
 
+  // Manually confirm a pending guest who can't confirm on their own end. Moves
+  // them from the pending pool into the confirmed list and emails a receipt.
+  const [confirmingGuestId, setConfirmingGuestId] = useState<number | null>(null)
+
+  const handleManualConfirm = async (guest: Guest) => {
+    setConfirmingGuestId(guest.id)
+    const result = await confirmGuestManually(guest.id, event.id)
+    setConfirmingGuestId(null)
+    if (!result.ok) return
+    const nowIso = new Date().toISOString()
+    setGuests((prev) => prev.filter((g) => g.id !== guest.id))
+    setConfirmedGuests((prev) =>
+      prev.some((g) => g.id === guest.id)
+        ? prev
+        : [...prev, { ...guest, confirmed: true, confirmed_at: nowIso, cancelled: false, cancelled_at: null }],
+    )
+  }
+
+  // Move a guest from the pending pool into an already-generated table. Reuses
+  // the same "send dinner details" action that seats guests, so the picked
+  // guest gets their table email and drops out of the pool. Keyed per table.
+  const [addSelection, setAddSelection] = useState<Record<string, number | "">>({})
+  const [addingToTable, setAddingToTable] = useState<string | null>(null)
+  const [addNotice, setAddNotice] = useState<Record<string, string>>({})
+
+  const handleAddToTable = async (tableLabel: string) => {
+    const guestId = addSelection[tableLabel]
+    if (!guestId) return
+    // Guest ids can come back from the DB as strings, so compare loosely.
+    const guest = unseatedGuests.find((g) => String(g.id) === String(guestId))
+    if (!guest) return
+    setAddingToTable(tableLabel)
+    setAddNotice((prev) => ({ ...prev, [tableLabel]: "" }))
+    const result = await sendDinnerDetailsToTable([guest.id], tableLabel, event.id)
+    setAddingToTable(null)
+    if (result.sent > 0) {
+      setGuests((prev) =>
+        prev.map((g) =>
+          g.id === guest.id
+            ? { ...g, details_sent_at: new Date().toISOString(), table_label: tableLabel }
+            : g,
+        ),
+      )
+      setAddSelection((prev) => ({ ...prev, [tableLabel]: "" }))
+      setAddNotice((prev) => ({
+        ...prev,
+        [tableLabel]: `${guest.name} was added to ${tableLabel} and emailed their details.`,
+      }))
+    } else {
+      setAddNotice((prev) => ({
+        ...prev,
+        [tableLabel]: result.errors[0] || "Could not add the guest. Try again.",
+      }))
+    }
+  }
+
   const handleResendConfirmation = async (label: string, tableGuests: Guest[]) => {
     setResendingTable(label)
     setResendNotice((prev) => ({ ...prev, [label]: "" }))
@@ -830,6 +887,41 @@ function EventDetail({
     if (dragging) moveGuest(dragging.guestId, dragging.fromTable, toTable)
     setDragging(null)
     setDragOverTable(null)
+  }
+
+  // Pool guests still available to drop into a generated table: pending guests
+  // (not yet emailed) who aren't already seated in any of the generated tables.
+  const seatedInParsed = useMemo(() => {
+    const ids = new Set<number>()
+    for (const t of parsedTables ?? []) for (const g of t.guestObjects) ids.add(g.id)
+    return ids
+  }, [parsedTables])
+  const poolForTables = useMemo(
+    () => unseatedGuests.filter((g) => !seatedInParsed.has(g.id)),
+    [unseatedGuests, seatedInParsed],
+  )
+
+  // Per-generated-table dropdown selection for adding a pool guest.
+  const [parsedAddSelection, setParsedAddSelection] = useState<Record<string, number | "">>({})
+
+  const addPoolGuestToParsedTable = (tableName: string) => {
+    const guestId = parsedAddSelection[tableName]
+    if (!guestId) return
+    // Guest ids can come back from the DB as strings, so compare loosely.
+    const guest = poolForTables.find((g) => String(g.id) === String(guestId))
+    if (!guest) return
+    setParsedTables((prev) =>
+      prev
+        ? prev.map((t) =>
+            t.table === tableName
+              ? t.guestObjects.some((g) => String(g.id) === String(guestId))
+                ? t
+                : { ...t, guestObjects: [...t.guestObjects, guest] }
+              : t,
+          )
+        : prev,
+    )
+    setParsedAddSelection((prev) => ({ ...prev, [tableName]: "" }))
   }
 
   return (
@@ -1193,7 +1285,7 @@ function EventDetail({
                       <p className="mb-3 text-[13px] text-muted-foreground">{table.why}</p>
                       {table.guestObjects.length === 0 ? (
                         <p className="rounded-lg border border-dashed border-border px-3 py-3 text-center text-[13px] text-muted-foreground">
-                          Empty table — drag guests here.
+                          Empty table — drag guests here or add one from the pool below.
                         </p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
@@ -1244,6 +1336,43 @@ function EventDetail({
                               </span>
                             )
                           })}
+                        </div>
+                      )}
+                      {!table.locked && poolForTables.length > 0 && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                          <label
+                            htmlFor={`pool-${table.table}`}
+                            className="text-[12px] font-medium text-muted-foreground"
+                          >
+                            Add from pool:
+                          </label>
+                          <select
+                            id={`pool-${table.table}`}
+                            value={parsedAddSelection[table.table] ?? ""}
+                            onChange={(e) =>
+                              setParsedAddSelection((prev) => ({
+                                ...prev,
+                                [table.table]: e.target.value ? Number(e.target.value) : "",
+                              }))
+                            }
+                            className="rounded-lg border-[1.5px] border-input bg-card px-2.5 py-1.5 text-[13px] text-foreground focus:border-[var(--gold)] focus:outline-none"
+                          >
+                            <option value="">Select a guest…</option>
+                            {poolForTables.map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {g.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => addPoolGuestToParsedTable(table.table)}
+                            disabled={!parsedAddSelection[table.table]}
+                            title={`Add the selected pool guest to ${table.table}`}
+                            className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[12px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                          >
+                            <Plus className="size-3.5" aria-hidden="true" />
+                            Add to {table.table}
+                          </button>
                         </div>
                       )}
                       {result && (
@@ -1384,6 +1513,21 @@ function EventDetail({
                               )}
                             />
                             {g.name}
+                            {status === "pending" && (
+                              <button
+                                onClick={() => handleManualConfirm(g)}
+                                disabled={confirmingGuestId === g.id}
+                                title={`Manually confirm ${g.name} for ${t.label}`}
+                                aria-label={`Manually confirm ${g.name}`}
+                                className="ml-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-[var(--success)]/15 hover:text-[var(--success)] disabled:opacity-50"
+                              >
+                                {confirmingGuestId === g.id ? (
+                                  <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <CheckCircle2 className="size-3" aria-hidden="true" />
+                                )}
+                              </button>
+                            )}
                             <button
                               onClick={() => handleRemoveFromTable(g)}
                               disabled={removingGuestId === g.id}
@@ -1403,6 +1547,52 @@ function EventDetail({
                       )
                     })}
                   </div>
+                  {unseatedGuests.length > 0 && (
+                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                      <label htmlFor={`add-${t.label}`} className="text-[12px] font-medium text-muted-foreground">
+                        Add from pool:
+                      </label>
+                      <select
+                        id={`add-${t.label}`}
+                        value={addSelection[t.label] ?? ""}
+                        onChange={(e) =>
+                          setAddSelection((prev) => ({
+                            ...prev,
+                            [t.label]: e.target.value ? Number(e.target.value) : "",
+                          }))
+                        }
+                        className="rounded-lg border-[1.5px] border-input bg-card px-2.5 py-1.5 text-[13px] text-foreground focus:border-[var(--gold)] focus:outline-none"
+                      >
+                        <option value="">Select a guest…</option>
+                        {unseatedGuests.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => handleAddToTable(t.label)}
+                        disabled={!addSelection[t.label] || addingToTable === t.label}
+                        title={`Add the selected guest to ${t.label} and email their dinner details`}
+                        className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-input bg-card px-3 py-1.5 text-[12px] font-medium transition-colors hover:border-[var(--gold)] disabled:opacity-50"
+                      >
+                        {addingToTable === t.label ? (
+                          <>
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                            Adding...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="size-3.5" aria-hidden="true" />
+                            Add to {t.label}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                  {addNotice[t.label] && (
+                    <p className="mt-3 text-[12px] text-muted-foreground">{addNotice[t.label]}</p>
+                  )}
                   {removeNotice[t.label] && (
                     <p className="mt-3 text-[12px] text-muted-foreground">{removeNotice[t.label]}</p>
                   )}
