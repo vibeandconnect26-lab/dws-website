@@ -7,6 +7,10 @@ const fromNumber = process.env.TWILIO_PHONE_NUMBER
 
 const client = accountSid && authToken ? twilio(accountSid, authToken) : null
 
+// GLOBAL KILL SWITCH: when true, no texts are sent at all.
+// Set COMMS_ENABLED=true to resume sending.
+const COMMS_DISABLED = process.env.COMMS_ENABLED !== "true"
+
 // Normalize a US phone number to E.164 (+1XXXXXXXXXX) so Twilio accepts it.
 // Returns null if it doesn't look like a valid 10-digit US number.
 export function normalizePhone(raw: string | null | undefined): string | null {
@@ -44,6 +48,9 @@ export function buildChosenMessage(guest: Guest, event: EventInfo) {
 }
 
 export async function sendChosenSms(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing texts are paused (COMMS kill switch is on)." }
+  }
   if (!client || !fromNumber) {
     return { ok: false, error: "Twilio is not configured (set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER)." }
   }
@@ -82,6 +89,9 @@ export function buildConfirmationMessage(guest: Guest, event: EventInfo) {
 }
 
 export async function sendConfirmationSms(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing texts are paused (COMMS kill switch is on)." }
+  }
   if (!client || !fromNumber) {
     return { ok: false, error: "Twilio is not configured (set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER)." }
   }
@@ -102,6 +112,9 @@ export async function sendConfirmationSms(guest: Guest, event: EventInfo) {
 }
 
 export async function sendReminderSms(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing texts are paused (COMMS kill switch is on)." }
+  }
   if (!client || !fromNumber) {
     return { ok: false, error: "Twilio is not configured (set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER)." }
   }

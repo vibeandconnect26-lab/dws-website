@@ -19,6 +19,10 @@ function resolveFrom() {
 
 const FROM = resolveFrom()
 
+// GLOBAL KILL SWITCH: when true, no emails are sent at all.
+// Set to false (or set COMMS_ENABLED=true) to resume sending.
+const COMMS_DISABLED = process.env.COMMS_ENABLED !== "true"
+
 function getBaseUrl() {
   if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL.replace(/\/$/, "")
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
@@ -180,6 +184,9 @@ function buildFeedbackHtml(guest: Guest, event: EventInfo) {
 }
 
 export async function sendFeedbackRequest(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing email is paused (COMMS kill switch is on)." }
+  }
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
   }
@@ -219,6 +226,9 @@ function buildSystemErrorHtml(guest: Guest, event: EventInfo) {
 }
 
 export async function sendSystemErrorNotice(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing email is paused (COMMS kill switch is on)." }
+  }
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
   }
@@ -260,6 +270,9 @@ function buildConfirmationReceiptHtml(guest: Guest, event: EventInfo) {
 }
 
 export async function sendConfirmationReceipt(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing email is paused (COMMS kill switch is on)." }
+  }
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
   }
@@ -305,6 +318,9 @@ function buildCancellationReceiptHtml(guest: Guest, event: EventInfo) {
 }
 
 export async function sendCancellationReceipt(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing email is paused (COMMS kill switch is on)." }
+  }
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
   }
@@ -353,6 +369,9 @@ function buildNotChosenHtml(guest: Guest, event: EventInfo) {
 }
 
 export async function sendNotChosenNotice(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing email is paused (COMMS kill switch is on)." }
+  }
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
   }
@@ -398,6 +417,9 @@ function buildDinnerCancelledHtml(guest: Guest, event: EventInfo) {
 }
 
 export async function sendDinnerCancelled(guest: Guest, event: EventInfo) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing email is paused (COMMS kill switch is on)." }
+  }
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
   }
@@ -419,6 +441,9 @@ export async function sendDinnerCancelled(guest: Guest, event: EventInfo) {
 }
 
 export async function sendDinnerDetails(guest: Guest, event: EventInfo, seatIndex = 0) {
+  if (COMMS_DISABLED) {
+    return { ok: false, error: "Outgoing email is paused (COMMS kill switch is on)." }
+  }
   if (!resend) {
     return { ok: false, error: "RESEND_API_KEY is not configured." as string }
   }
